@@ -26,6 +26,9 @@ func get_stamina() -> float: # Returns the current stamina value.
 func get_maximum_stamina() -> float: # Returns the current maximum stamina value used as inventory capacity.
     return _maximum_stamina # Supplies one shared stamina maximum to both status and inventory interfaces.
 
+func has_stamina() -> bool: # Reports whether exertion systems may still spend stamina.
+    return _stamina > 0.0 # Treats an empty stamina pool as unavailable for sprint-speed movement.
+
 func get_mana() -> float: # Returns the current mana value.
     return _mana # Exposes the authoritative current mana.
 
@@ -56,6 +59,22 @@ func set_stamina(value: float) -> void: # Changes current stamina while respecti
         return # Avoids unnecessary interface refreshes.
     _stamina = next_value # Stores the validated stamina value.
     _revision += 1 # Marks the resource model as changed.
+
+func consume_stamina(amount: float) -> float: # Spends up to the requested stamina and reports the amount actually consumed.
+    var requested_amount: float = maxf(amount, 0.0) # Rejects negative consumption without turning it into recovery.
+    if is_zero_approx(requested_amount) or is_zero_approx(_stamina): # Detects a no-op request or an already empty pool.
+        return 0.0 # Reports that no stamina could be consumed.
+    var previous_stamina: float = _stamina # Retains the prior value so partial final-frame spending can be reported accurately.
+    set_stamina(_stamina - requested_amount) # Uses the ordinary clamped setter so HUD revision tracking remains authoritative.
+    return previous_stamina - _stamina # Returns the exact amount removed, including a partial spend at exhaustion.
+
+func restore_stamina(amount: float) -> float: # Restores up to the requested stamina and reports the amount actually recovered.
+    var requested_amount: float = maxf(amount, 0.0) # Rejects negative recovery without turning it into consumption.
+    if is_zero_approx(requested_amount) or is_equal_approx(_stamina, _maximum_stamina): # Detects a no-op request or a full stamina pool.
+        return 0.0 # Reports that no stamina needed to be restored.
+    var previous_stamina: float = _stamina # Retains the prior value so capped recovery can be reported accurately.
+    set_stamina(_stamina + requested_amount) # Uses the ordinary clamped setter so HUD revision tracking remains authoritative.
+    return _stamina - previous_stamina # Returns the exact amount restored before the maximum cap.
 
 func set_maximum_stamina(value: float) -> void: # Changes maximum stamina and therefore the inventory's live weight limit.
     var next_maximum: float = maxf(value, MINIMUM_MAXIMUM_VALUE) # Guarantees a valid positive maximum.
