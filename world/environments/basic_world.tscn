@@ -37,7 +37,7 @@ rotation_degrees = Vector3(-52, -32, 0)
 light_color = Color(1, 0.92, 0.8, 1)
 light_energy = 1.2
 shadow_enabled = true
-directional_shadow_max_distance = 480.0
+directional_shadow_max_distance = 720.0
 
 [node name="Terrain" type="Node3D" parent="."]
 script = ExtResource("1_terrain")
