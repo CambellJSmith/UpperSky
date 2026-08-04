@@ -1,4 +1,4 @@
-extends Node3D # Owns and initializes the active world and player composition.
+extends Node3D # Owns and initializes the active world, player, and developer interface composition.
 
 const PLAYER_SPAWN_HORIZONTAL: Vector2 = Vector2.ZERO # Places the initial player start at the centre of the flat world-origin terrain stamp.
 const PLAYER_SPAWN_PROBE_DISTANCE: float = 512.0 # Starts the player collider high enough to sweep down onto any expected terrain elevation.
@@ -10,8 +10,10 @@ const PLAYER_SPAWN_FALLBACK_CLEARANCE: float = 16.0 # Keeps the emergency sample
 @onready var _terrain: InfiniteTerrain = $World/Terrain # Stores the active infinite terrain controller.
 @onready var _dynamic_entities: Node3D = $DynamicEntities # Owns active entities that participate in floating-origin rebasing.
 @onready var _player: FirstPersonPlayer = $DynamicEntities/Player # Stores the active first-person player instance.
+@onready var _developer_console: DeveloperConsole = $DeveloperConsole # Stores the reusable tilde console that controls developer commands.
 
-func _ready() -> void: # Defers world initialization until every child node has completed its own ready sequence.
+func _ready() -> void: # Connects developer controls and defers terrain-backed player initialization.
+    _developer_console.initialize(_player) # Supplies the active player directly without global state or signals.
     _initialize_game.call_deferred() # Starts the collision-synchronized spawn sequence outside the scene-tree ready callback.
 
 func _initialize_game() -> void: # Builds nearby collision and places the complete player capsule onto the resolved physical surface.
