@@ -33,6 +33,14 @@ const LOWEST_VALLEY_FLOOR: float = -260.0 # Prevents extreme valley combinations
 const SURFACE_DETAIL_HEIGHT: float = 18.0 # Adds broad local relief without overwhelming the eight-metre terrain grid.
 const SUMMIT_DETAIL_FADE_START: float = 0.70 # Begins suppressing secondary ridges as the primary mountain crest rises.
 const SUMMIT_DETAIL_FADE_END: float = 0.95 # Removes small-scale detail before primary ridges reach their rounded summit.
+const SHORELINE_LAND_BAND_MINIMUM: float = 140.0 # Starts shoreline softening across a broad vertical approach above each local water level.
+const SHORELINE_LAND_BAND_RANGE: float = 90.0 # Varies dry shoreline influence from broad beaches to still-gentle rocky approaches.
+const SHORELINE_UNDERWATER_BAND_MINIMUM: float = 100.0 # Creates substantial shallow shelves beneath every local water surface.
+const SHORELINE_UNDERWATER_BAND_RANGE: float = 70.0 # Varies shelf depth over long distances without changing the flat water elevation.
+const SHORELINE_LAND_PROFILE_MINIMUM: float = 2.0 # Flattens the immediate dry shoreline while preserving slope continuity at the outer band.
+const SHORELINE_LAND_PROFILE_RANGE: float = 0.65 # Produces broader shallow beaches in selected shoreline regions.
+const SHORELINE_UNDERWATER_PROFILE_MINIMUM: float = 1.75 # Makes submerged terrain deepen gradually immediately offshore.
+const SHORELINE_UNDERWATER_PROFILE_RANGE: float = 0.55 # Produces varied but consistently traversable underwater shelves.
 
 var _warp_x_noise: FastNoiseLite # Distorts world sampling along the x axis at continental scale.
 var _warp_z_noise: FastNoiseLite # Distorts world sampling along the z axis independently.
@@ -50,6 +58,7 @@ var _primary_valley_noise: FastNoiseLite # Produces the longest and deepest wind
 var _secondary_valley_noise: FastNoiseLite # Produces branching tributary valleys at a smaller scale.
 var _valley_width_noise: FastNoiseLite # Varies valley widths over long distances.
 var _surface_detail_noise: FastNoiseLite # Adds restrained local terrain variation after macro shaping.
+var _shoreline_profile_noise: FastNoiseLite # Varies shoreline and underwater-shelf breadth over kilometre-scale regions.
 
 func _init() -> void: # Builds every deterministic noise source used by the terrain hierarchy.
     _warp_x_noise = _create_noise(11, 0.00013, 3, 0.52, 2.0, FastNoiseLite.FRACTAL_FBM) # Creates slow continental x-axis coordinate distortion.
@@ -68,6 +77,7 @@ func _init() -> void: # Builds every deterministic noise source used by the terr
     _secondary_valley_noise = _create_noise(127, 0.00029, 4, 0.5, 2.0, FastNoiseLite.FRACTAL_FBM) # Creates branching tributary valley lines.
     _valley_width_noise = _create_noise(139, 0.00008, 3, 0.5, 2.0, FastNoiseLite.FRACTAL_FBM) # Changes valley width gradually over several kilometres.
     _surface_detail_noise = _create_noise(149, 0.0018, 3, 0.42, 2.0, FastNoiseLite.FRACTAL_FBM) # Adds broad local detail appropriate to the coarse mesh.
+    _shoreline_profile_noise = _create_noise(157, 0.00032, 3, 0.5, 2.0, FastNoiseLite.FRACTAL_FBM) # Varies broad shoreline profiles without creating small repetitive beach bands.
 
 func sample_height(world_x: float, world_z: float) -> float: # Returns the deterministic terrain height at one world-space horizontal position.
     var warp_x: float = _warp_x_noise.get_noise_2d(world_x, world_z) * WORLD_WARP_DISTANCE # Calculates macro x-axis distortion.
@@ -85,6 +95,8 @@ func sample_height(world_x: float, world_z: float) -> float: # Returns the deter
     var basin_mask: float = smoothstep(0.62, 0.88, 1.0 - basin_value) # Selects only the deepest broad basin regions.
     var basin_cut: float = basin_mask * BASIN_DEPTH # Lowers selected shelf regions into enormous bowls and lowlands.
     var base_height: float = tier_height + plateau_relief - basin_cut # Combines the continental shelf, local plateau relief, and broad basins.
+    var regional_water_height: float = tier_height + plateau_relief * TerrainConfiguration.WATER_REGIONAL_PLATEAU_INFLUENCE - basin_cut * TerrainConfiguration.WATER_REGIONAL_BASIN_INFLUENCE # Reconstructs the same broad local height used to select rendered water bands.
+    var local_water_level: float = _get_local_water_level(regional_water_height) # Selects the exact tiered water elevation whose shoreline will shape nearby terrain.
     var mountain_province_value: float = _sample_normalized(_mountain_province_noise, sample_x, sample_z) # Reads the mountain-province placement field.
     var mountain_province_mask: float = smoothstep(0.44, 0.72, mountain_province_value) # Restricts mountains to large coherent provinces.
     var mountain_mass_value: float = _sample_normalized(_mountain_mass_noise, sample_x, sample_z) # Reads the broad internal mountain mass field.
@@ -131,7 +143,9 @@ func sample_height(world_x: float, world_z: float) -> float: # Returns the deter
     var valley_height: float = lerpf(height_after_primary_valley, secondary_carved_height, secondary_valley_weight) # Blends tributaries into plateaus, mountains, and major valleys.
     var valley_suppression: float = clampf(maxf(primary_valley_shape, secondary_valley_shape) * 0.82, 0.0, 1.0) # Suppresses noisy detail on broad valley floors.
     var surface_detail: float = _surface_detail_noise.get_noise_2d(sample_x, sample_z) * SURFACE_DETAIL_HEIGHT * (1.0 - valley_suppression) # Adds restrained local terrain relief away from smooth valley floors.
-    var full_height: float = valley_height + surface_detail # Resolves the complete monumental terrain hierarchy.
+    var full_height: float = valley_height + surface_detail # Resolves the complete monumental terrain hierarchy before shoreline grading.
+    var shoreline_profile: float = _sample_normalized(_shoreline_profile_noise, sample_x, sample_z) # Reads slow regional variation in beach and underwater-shelf breadth.
+    full_height = _shape_height_around_water(full_height, local_water_level, shoreline_profile) # Compresses near-water relief into broad shallow approaches while preserving distant terrain.
     var spawn_distance: float = Vector2(world_x, world_z).length() # Measures distance from the world-origin spawn centre.
     var spawn_blend: float = smoothstep(SPAWN_INNER_RADIUS, SPAWN_OUTER_RADIUS, spawn_distance) # Introduces monumental terrain gradually outside the safe start.
     var spawn_height: float = plateau_relief * 0.10 + surface_detail * 0.18 # Keeps the initial region gently varied without macro cliffs or mountains.
@@ -146,6 +160,34 @@ func _sample_broad_ridge_support(sample_x: float, sample_z: float, centre_ridge:
     var south_ridge: float = _sample_normalized(_mountain_ridge_noise, sample_x, sample_z + MOUNTAIN_WIDTH_SAMPLE_DISTANCE) # Samples ridge support to the south.
     var surrounding_average: float = (east_ridge + west_ridge + north_ridge + south_ridge) * 0.25 # Measures the broad ridge body independently of one centre-line maximum.
     return centre_ridge * 0.20 + surrounding_average * 0.80 # Lets surrounding width dominate while retaining a restrained contribution from the centre.
+
+func _get_local_water_level(regional_height: float) -> float: # Selects the same flat tiered water elevation used by the water mesh generator.
+    var water_coordinate: float = (regional_height - TerrainConfiguration.WATER_LEVEL_CLEARANCE - TerrainConfiguration.WATER_LEVEL_OFFSET) / TIER_HEIGHT # Finds the highest water band safely below the surrounding regional terrain.
+    var water_tier_index: int = clampi(floori(water_coordinate), 0, TIER_LEVEL_COUNT - 1) # Restricts the selected band to the six established world tiers.
+    return float(water_tier_index) * TIER_HEIGHT + TerrainConfiguration.WATER_LEVEL_OFFSET # Returns the exact shared local water elevation.
+
+func _shape_height_around_water(terrain_height: float, water_level: float, shoreline_profile: float) -> float: # Converts steep near-water contours into shallow dry approaches and underwater shelves.
+    var height_delta: float = terrain_height - water_level # Measures signed terrain elevation relative to the local flat water surface.
+    if height_delta >= 0.0: # Selects the dry shoreline profile above the waterline.
+        var land_band: float = SHORELINE_LAND_BAND_MINIMUM + shoreline_profile * SHORELINE_LAND_BAND_RANGE # Varies the vertical terrain range drawn into the shallow dry approach.
+        if height_delta >= land_band: # Detects terrain beyond shoreline influence.
+            return terrain_height # Preserves hills, cliffs, plateaus, and mountains outside the beach approach.
+        var normalized_land_height: float = clampf(height_delta / land_band, 0.0, 1.0) # Maps the affected dry elevation into a zero-to-one shoreline coordinate.
+        var land_profile_power: float = SHORELINE_LAND_PROFILE_MINIMUM + shoreline_profile * SHORELINE_LAND_PROFILE_RANGE # Selects how strongly the immediate shoreline flattens.
+        var shaped_land_height: float = _get_shallow_profile(normalized_land_height, land_profile_power) * land_band # Expands low dry contours while matching the original height and slope at the outer edge.
+        return water_level + shaped_land_height # Returns the broad shallow dry shoreline elevation.
+    var water_depth: float = -height_delta # Converts submerged signed elevation into a positive depth below the surface.
+    var underwater_band: float = SHORELINE_UNDERWATER_BAND_MINIMUM + shoreline_profile * SHORELINE_UNDERWATER_BAND_RANGE # Varies how far vertical relief is drawn into the shallow shelf.
+    if water_depth >= underwater_band: # Detects terrain below the shelf influence range.
+        return terrain_height # Preserves deep lake floors, valley bottoms, and underwater cliffs beyond the near-shore shelf.
+    var normalized_water_depth: float = clampf(water_depth / underwater_band, 0.0, 1.0) # Maps the affected depth into a zero-to-one offshore coordinate.
+    var underwater_profile_power: float = SHORELINE_UNDERWATER_PROFILE_MINIMUM + shoreline_profile * SHORELINE_UNDERWATER_PROFILE_RANGE # Selects how gradually the underwater shelf descends.
+    var shaped_water_depth: float = _get_shallow_profile(normalized_water_depth, underwater_profile_power) * underwater_band # Expands shallow submerged contours while preserving continuity into deep terrain.
+    return water_level - shaped_water_depth # Returns the broad shallow underwater shelf elevation.
+
+func _get_shallow_profile(normalized_height: float, profile_power: float) -> float: # Creates a flattened inner profile that rejoins untouched terrain with matching outer slope.
+    var powered_height: float = pow(normalized_height, profile_power) # Suppresses vertical change strongly near the waterline.
+    return powered_height * (profile_power - (profile_power - 1.0) * normalized_height) # Preserves value and first derivative at the outer edge to avoid a visible grading seam.
 
 func _get_tier_height(macro_elevation: float) -> float: # Converts a normalized macro value into continuous broad elevation shelves.
     var highest_tier_index: float = float(TIER_LEVEL_COUNT - 1) # Converts the number of shelf levels into the highest valid zero-based index.
