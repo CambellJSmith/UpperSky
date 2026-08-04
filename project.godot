@@ -75,3 +75,7 @@ Button_Start={
 "deadzone": 0.2,
 "events": [Object(InputEventKey,"physical_keycode":4194305), Object(InputEventJoypadButton,"button_index":6)]
 }
+Inventory={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":73,"unicode":105), Object(InputEventJoypadButton,"button_index":3)]
+}
