@@ -4,6 +4,7 @@ class_name TerrainWaterMeshBuilder # Makes water-surface construction available 
 const WATER_UV_SCALE: float = 0.0078125 # Produces stable world-space coordinates for future animated water materials.
 const WATER_CLIP_EPSILON: float = 0.02 # Keeps shoreline classification stable when terrain sits numerically on a water level.
 const WATER_LEVEL_EPSILON: float = 0.01 # Treats nearly identical neighbouring water bands as one continuous surface.
+const MINIMUM_TRIANGLE_AREA_SQUARED: float = 0.000001 # Prevents numerically collapsed shoreline and curtain triangles from entering the mesh.
 
 var _height_sampler: TerrainHeightSampler # Supplies the authoritative terrain surface used for exact shoreline clipping.
 var _water_level_sampler: TerrainWaterLevelSampler # Supplies one of the world's flat local water bands at every horizontal position.
@@ -60,11 +61,11 @@ func build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh: # Generates clip
             var east_level: float = level_cache[level_index + 1] # Reads the neighbouring cell level across the positive x edge, including the next chunk when required.
             if absf(water_level - east_level) > WATER_LEVEL_EPSILON: # Detects a genuine step between local water bands.
                 var east_normal: Vector3 = Vector3.RIGHT if water_level > east_level else Vector3.LEFT # Points the transition normal from the higher water body toward the lower one.
-                _append_level_transition(Vector3(local_right, height_cache[top_right_index], local_back), Vector3(local_right, height_cache[bottom_right_index], local_forward), water_level, east_level, east_normal, chunk_world_x, chunk_world_z, vertices, normals, uvs) # Seals the east-facing plane edge only where both levels cover the complete boundary.
+                _append_level_transition(Vector3(local_right, height_cache[top_right_index], local_back), Vector3(local_right, height_cache[bottom_right_index], local_forward), water_level, east_level, east_normal, chunk_world_x, chunk_world_z, vertices, normals, uvs) # Clips and seals the east-facing plane edge against both terrain and the lower water level.
             var south_level: float = level_cache[level_index + water_resolution] # Reads the neighbouring cell level across the positive z edge, including the next chunk when required.
             if absf(water_level - south_level) > WATER_LEVEL_EPSILON: # Detects a genuine step between north and south water bands.
                 var south_normal: Vector3 = Vector3.BACK if water_level > south_level else Vector3.FORWARD # Points the transition normal from the higher water body toward the lower one.
-                _append_level_transition(Vector3(local_left, height_cache[bottom_left_index], local_forward), Vector3(local_right, height_cache[bottom_right_index], local_forward), water_level, south_level, south_normal, chunk_world_x, chunk_world_z, vertices, normals, uvs) # Seals the south-facing plane edge only where both levels cover the complete boundary.
+                _append_level_transition(Vector3(local_left, height_cache[bottom_left_index], local_forward), Vector3(local_right, height_cache[bottom_right_index], local_forward), water_level, south_level, south_normal, chunk_world_x, chunk_world_z, vertices, normals, uvs) # Clips and seals the south-facing plane edge against both terrain and the lower water level.
     var water_mesh: ArrayMesh = ArrayMesh.new() # Creates the return mesh even when this chunk contains no submerged terrain.
     if vertices.is_empty(): # Detects a completely dry chunk before allocating an empty render surface.
         return water_mesh # Returns an empty mesh that the chunk node will omit from rendering.
@@ -98,19 +99,38 @@ func _append_clipped_surface_triangle(terrain_a: Vector3, terrain_b: Vector3, te
     for fan_index: int in range(1, water_polygon.size() - 1): # Triangulates the clipped polygon as a stable fan.
         _append_triangle(water_polygon[0], water_polygon[fan_index], water_polygon[fan_index + 1], Vector3.UP, chunk_world_x, chunk_world_z, vertices, normals, uvs) # Appends one horizontal water triangle without overlapping neighbouring cell interiors.
 
-func _append_level_transition(edge_start: Vector3, edge_end: Vector3, first_level: float, second_level: float, normal: Vector3, chunk_world_x: float, chunk_world_z: float, vertices: Array[Vector3], normals: Array[Vector3], uvs: Array[Vector2]) -> void: # Seals an exposed boundary between two submerged cells at different flat water levels.
-    var lower_level: float = minf(first_level, second_level) # Finds the bottom of the stepped water transition.
-    var upper_level: float = maxf(first_level, second_level) # Finds the top of the stepped water transition.
-    if edge_start.y >= lower_level - WATER_CLIP_EPSILON or edge_end.y >= lower_level - WATER_CLIP_EPSILON: # Checks whether terrain reaches the lower surface anywhere along the complete boundary.
-        return # Lets the terrain itself hide partial shoreline transitions instead of drawing a rectangular curtain through land.
-    var upper_start: Vector3 = Vector3(edge_start.x, upper_level, edge_start.z) # Builds the first upper edge vertex.
-    var upper_end: Vector3 = Vector3(edge_end.x, upper_level, edge_end.z) # Builds the second upper edge vertex.
-    var lower_start: Vector3 = Vector3(edge_start.x, lower_level, edge_start.z) # Builds the first lower edge vertex.
-    var lower_end: Vector3 = Vector3(edge_end.x, lower_level, edge_end.z) # Builds the second lower edge vertex.
-    _append_triangle(upper_start, upper_end, lower_start, normal, chunk_world_x, chunk_world_z, vertices, normals, uvs) # Adds the first half of the vertical water curtain.
-    _append_triangle(upper_end, lower_end, lower_start, normal, chunk_world_x, chunk_world_z, vertices, normals, uvs) # Adds the second half so no horizontal plane edge remains exposed.
+func _append_level_transition(edge_start: Vector3, edge_end: Vector3, first_level: float, second_level: float, normal: Vector3, chunk_world_x: float, chunk_world_z: float, vertices: Array[Vector3], normals: Array[Vector3], uvs: Array[Vector2]) -> void: # Clips a vertical curtain so no higher water plane edge is exposed beside a lower level or shoreline.
+    var lower_level: float = minf(first_level, second_level) # Finds the bottom water elevation available on either side of the boundary.
+    var upper_level: float = maxf(first_level, second_level) # Finds the higher water surface whose horizontal edge must be sealed.
+    var start_under_upper: bool = edge_start.y < upper_level - WATER_CLIP_EPSILON # Determines whether the first boundary endpoint lies beneath the higher surface.
+    var end_under_upper: bool = edge_end.y < upper_level - WATER_CLIP_EPSILON # Determines whether the second boundary endpoint lies beneath the higher surface.
+    if not start_under_upper and not end_under_upper: # Detects a boundary completely blocked by terrain above the higher water level.
+        return # Leaves the boundary dry because no water plane reaches it.
+    var clipped_start: Vector3 = edge_start # Starts with the complete first terrain endpoint.
+    var clipped_end: Vector3 = edge_end # Starts with the complete second terrain endpoint.
+    if start_under_upper != end_under_upper: # Detects a boundary that crosses the higher shoreline partway along its length.
+        var edge_height_delta: float = edge_end.y - edge_start.y # Calculates the vertical terrain change along the shared cell boundary.
+        if is_zero_approx(edge_height_delta): # Detects an unusable numerically flat crossing.
+            return # Omits the degenerate curtain rather than exposing unstable geometry.
+        var shoreline_weight: float = clampf((upper_level - edge_start.y) / edge_height_delta, 0.0, 1.0) # Finds the exact point where terrain reaches the upper water level.
+        var shoreline_point: Vector3 = edge_start.lerp(edge_end, shoreline_weight) # Interpolates the shared boundary position at the higher shoreline.
+        if start_under_upper: # Detects whether the submerged segment begins at the first endpoint.
+            clipped_end = shoreline_point # Truncates the curtain where terrain rises into the upper water surface.
+        else: # Handles the opposite boundary orientation.
+            clipped_start = shoreline_point # Starts the curtain where terrain drops beneath the upper water surface.
+    var upper_start: Vector3 = Vector3(clipped_start.x, upper_level, clipped_start.z) # Builds the first vertex on the exposed upper plane edge.
+    var upper_end: Vector3 = Vector3(clipped_end.x, upper_level, clipped_end.z) # Builds the second vertex on the exposed upper plane edge.
+    var lower_start_height: float = maxf(lower_level, clipped_start.y) # Uses the lower water surface where present and terrain where the lower side is dry.
+    var lower_end_height: float = maxf(lower_level, clipped_end.y) # Clips the second curtain bottom against either lower water or terrain.
+    var lower_start: Vector3 = Vector3(clipped_start.x, lower_start_height, clipped_start.z) # Builds the first clipped bottom vertex.
+    var lower_end: Vector3 = Vector3(clipped_end.x, lower_end_height, clipped_end.z) # Builds the second clipped bottom vertex.
+    _append_triangle(upper_start, upper_end, lower_start, normal, chunk_world_x, chunk_world_z, vertices, normals, uvs) # Adds the first terrain-clipped half of the vertical transition.
+    _append_triangle(upper_end, lower_end, lower_start, normal, chunk_world_x, chunk_world_z, vertices, normals, uvs) # Adds the second half so no partial upper plane lip remains visible.
 
 func _append_triangle(point_a: Vector3, point_b: Vector3, point_c: Vector3, normal: Vector3, chunk_world_x: float, chunk_world_z: float, vertices: Array[Vector3], normals: Array[Vector3], uvs: Array[Vector2]) -> void: # Appends one non-indexed water triangle and its shared attributes.
+    var triangle_cross: Vector3 = (point_b - point_a).cross(point_c - point_a) # Measures triangle area before adding potentially collapsed clipping output.
+    if triangle_cross.length_squared() <= MINIMUM_TRIANGLE_AREA_SQUARED: # Detects degenerate shoreline or curtain triangles.
+        return # Omits zero-area geometry that could create rendering artifacts.
     vertices.append(point_a) # Stores the first triangle position.
     vertices.append(point_b) # Stores the second triangle position.
     vertices.append(point_c) # Stores the third triangle position.
