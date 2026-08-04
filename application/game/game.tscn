@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://world/environments/basic_world.tscn" id="1_world"]
+[ext_resource type="PackedScene" path="res://actors/player/first_person_player.tscn" id="2_player"]
+
+[node name="Game" type="Node3D"]
+
+[node name="World" parent="." instance=ExtResource("1_world")]
+
+[node name="Player" parent="." instance=ExtResource("2_player")]
+position = Vector3(0, 0.05, 5)

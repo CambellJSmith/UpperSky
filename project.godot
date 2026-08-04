@@ -1,0 +1,73 @@
+; Engine configuration file.
+; Edit this file through the Godot editor where possible.
+config_version=5
+
+[application]
+
+config/name="UpperSky"
+run/main_scene="res://application/game/game.tscn"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/window_width_override=1280
+window/size/window_height_override=720
+window/stretch/mode="canvas_items"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/default_filters/use_nearest_mipmap_filter=false
+
+[physics]
+
+3d/default_gravity=20.0
+
+[input]
+
+StickLeft_North={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":87,"unicode":119), Object(InputEventJoypadMotion,"axis":1,"axis_value":-1.0)]
+}
+StickLeft_South={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":83,"unicode":115), Object(InputEventJoypadMotion,"axis":1,"axis_value":1.0)]
+}
+StickLeft_West={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":65,"unicode":97), Object(InputEventJoypadMotion,"axis":0,"axis_value":-1.0)]
+}
+StickLeft_East={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":68,"unicode":100), Object(InputEventJoypadMotion,"axis":0,"axis_value":1.0)]
+}
+StickLeft_Click={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":4194325), Object(InputEventJoypadButton,"button_index":7)]
+}
+StickRight_North={
+"deadzone": 0.2,
+"events": [Object(InputEventJoypadMotion,"axis":3,"axis_value":-1.0)]
+}
+StickRight_South={
+"deadzone": 0.2,
+"events": [Object(InputEventJoypadMotion,"axis":3,"axis_value":1.0)]
+}
+StickRight_West={
+"deadzone": 0.2,
+"events": [Object(InputEventJoypadMotion,"axis":2,"axis_value":-1.0)]
+}
+StickRight_East={
+"deadzone": 0.2,
+"events": [Object(InputEventJoypadMotion,"axis":2,"axis_value":1.0)]
+}
+Button_A={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":32,"unicode":32), Object(InputEventJoypadButton,"button_index":0)]
+}
+Button_Start={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":4194305), Object(InputEventJoypadButton,"button_index":6)]
+}
