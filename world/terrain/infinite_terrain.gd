@@ -23,7 +23,7 @@ func initialize(player: Node3D, rebase_root: Node3D) -> void: # Connects terrain
     _rebase_root = rebase_root # Stores the active-entity root used by floating-origin adjustments.
     _current_chunk_coordinate = _get_chunk_coordinate(_get_player_world_position()) # Calculates the player's initial absolute world-grid coordinate.
     _refresh_streaming_set(_current_chunk_coordinate) # Builds the desired set and unloads anything outside it.
-    _build_chunk_immediately(_current_chunk_coordinate) # Guarantees visible collision exists beneath the player before physics advances.
+    _build_initial_collision_area(_current_chunk_coordinate) # Builds a complete collision neighbourhood before any spawn query or movement occurs.
     _update_collision_states() # Activates collision on all currently available near-player chunks.
 
 func _physics_process(_delta: float) -> void: # Keeps active entities close to local origin during unbounded travel.
@@ -90,6 +90,12 @@ func _build_pending_chunks() -> void: # Builds a bounded number of queued chunks
             continue # Skips duplicate generation.
         _build_chunk(chunk_coordinate) # Generates and installs one complete visual terrain chunk.
         chunks_built += 1 # Consumes one unit of the current frame's generation budget.
+
+func _build_initial_collision_area(centre: Vector2i) -> void: # Builds all chunks required for safe spawn collision before ordinary bounded streaming begins.
+    for offset_z: int in range(-TerrainConfiguration.INITIAL_COLLISION_RADIUS, TerrainConfiguration.INITIAL_COLLISION_RADIUS + 1): # Visits every initial collision row around the spawn chunk.
+        for offset_x: int in range(-TerrainConfiguration.INITIAL_COLLISION_RADIUS, TerrainConfiguration.INITIAL_COLLISION_RADIUS + 1): # Visits every initial collision column around the spawn chunk.
+            var chunk_coordinate: Vector2i = centre + Vector2i(offset_x, offset_z) # Converts the local spawn-neighbourhood offset into a world chunk coordinate.
+            _build_chunk_immediately(chunk_coordinate) # Creates the visual mesh and exact collision outside the ordinary per-frame budget.
 
 func _build_chunk_immediately(chunk_coordinate: Vector2i) -> void: # Builds one required chunk outside the ordinary frame budget for safe spawning.
     if _chunks.has(chunk_coordinate): # Detects whether the required chunk already exists.
