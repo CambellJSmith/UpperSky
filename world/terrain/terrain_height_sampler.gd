@@ -33,6 +33,12 @@ const LOWEST_VALLEY_FLOOR: float = -260.0 # Prevents extreme valley combinations
 const SURFACE_DETAIL_HEIGHT: float = 18.0 # Adds broad local relief without overwhelming the eight-metre terrain grid.
 const SUMMIT_DETAIL_FADE_START: float = 0.70 # Begins suppressing secondary ridges as the primary mountain crest rises.
 const SUMMIT_DETAIL_FADE_END: float = 0.95 # Removes small-scale detail before primary ridges reach their rounded summit.
+const UNDERWATER_DETAIL_FADE_START_DEPTH: float = 6.0 # Preserves shoreline texture before sediment-like smoothing begins below the surface.
+const UNDERWATER_DETAIL_FADE_END_DEPTH: float = 96.0 # Reaches the full local-detail reduction only in clearly submerged terrain.
+const UNDERWATER_DETAIL_MINIMUM_WEIGHT: float = 0.42 # Retains some seabed texture instead of making underwater terrain featureless.
+const UNDERWATER_FLATTEN_START_DEPTH: float = 12.0 # Avoids changing the immediate shoreline while beginning mild depth compression offshore.
+const UNDERWATER_FLATTEN_FULL_DEPTH: float = 180.0 # Reaches the maximum seabed flattening only in deep water.
+const UNDERWATER_MAXIMUM_DEPTH_COMPRESSION: float = 0.14 # Limits underwater relief reduction to a restrained fourteen percent.
 
 var _warp_x_noise: FastNoiseLite # Distorts world sampling along the x axis at continental scale.
 var _warp_z_noise: FastNoiseLite # Distorts world sampling along the z axis independently.
@@ -53,7 +59,7 @@ var _surface_detail_noise: FastNoiseLite # Adds restrained local terrain variati
 
 func _init() -> void: # Builds every deterministic noise source used by the terrain hierarchy.
     _warp_x_noise = _create_noise(11, 0.00013, 3, 0.52, 2.0, FastNoiseLite.FRACTAL_FBM) # Creates slow continental x-axis coordinate distortion.
-    _warp_z_noise = _create_noise(23, 0.00013, 3, 0.52, 2.0, FastNoiseLite.FRACTAL_FBM) # Creates independent slow continental z-axis coordinate distortion.
+    _warp_z_noise = _create_noise(23, 0.00013, 3, 0.52, 2.0, FastNoiseLite.FRACTAL_FBM) # Creates independent slow continental z-axis distortion.
     _continent_noise = _create_noise(37, 0.000035, 4, 0.5, 2.0, FastNoiseLite.FRACTAL_FBM) # Creates continental rises spanning many kilometres.
     _tier_noise = _create_noise(41, 0.000075, 4, 0.52, 2.0, FastNoiseLite.FRACTAL_FBM) # Selects huge regional elevation shelves.
     _tier_breakup_noise = _create_noise(53, 0.00018, 3, 0.48, 2.0, FastNoiseLite.FRACTAL_FBM) # Breaks shelf boundaries into complex regional shapes.
@@ -65,7 +71,7 @@ func _init() -> void: # Builds every deterministic noise source used by the terr
     _mountain_detail_noise = _create_noise(97, 0.00062, 3, 0.46, 2.0, FastNoiseLite.FRACTAL_RIDGED) # Creates large secondary shoulders without needle peaks.
     _mountain_terrace_noise = _create_noise(101, 0.00019, 3, 0.5, 2.0, FastNoiseLite.FRACTAL_FBM) # Varies giant alpine shelf structure.
     _primary_valley_noise = _create_noise(113, 0.00012, 4, 0.5, 2.0, FastNoiseLite.FRACTAL_FBM) # Creates long winding continent-scale valley centre lines.
-    _secondary_valley_noise = _create_noise(127, 0.00029, 4, 0.5, 2.0, FastNoiseLite.FRACTAL_FBM) # Creates branching tributary valley lines.
+    _secondary_valley_noise = _create_noise(127, 0.00029, 4, 0.5, 2.0, FastNoiseLite.FRACTAL_FBM) # Creates branching tributary valleys at a smaller scale.
     _valley_width_noise = _create_noise(139, 0.00008, 3, 0.5, 2.0, FastNoiseLite.FRACTAL_FBM) # Changes valley width gradually over several kilometres.
     _surface_detail_noise = _create_noise(149, 0.0018, 3, 0.42, 2.0, FastNoiseLite.FRACTAL_FBM) # Adds broad local detail appropriate to the coarse mesh.
 
@@ -85,6 +91,8 @@ func sample_height(world_x: float, world_z: float) -> float: # Returns the deter
     var basin_mask: float = smoothstep(0.62, 0.88, 1.0 - basin_value) # Selects only the deepest broad basin regions.
     var basin_cut: float = basin_mask * BASIN_DEPTH # Lowers selected shelf regions into enormous bowls and lowlands.
     var base_height: float = tier_height + plateau_relief - basin_cut # Combines the continental shelf, local plateau relief, and broad basins.
+    var regional_water_height: float = tier_height + plateau_relief * TerrainConfiguration.WATER_REGIONAL_PLATEAU_INFLUENCE - basin_cut * TerrainConfiguration.WATER_REGIONAL_BASIN_INFLUENCE # Reconstructs the same broad regional height used to select rendered water bands.
+    var local_water_level: float = _get_local_water_level(regional_water_height) # Selects the exact flat local water elevation used by water mesh generation.
     var mountain_province_value: float = _sample_normalized(_mountain_province_noise, sample_x, sample_z) # Reads the mountain-province placement field.
     var mountain_province_mask: float = smoothstep(0.44, 0.72, mountain_province_value) # Restricts mountains to large coherent provinces.
     var mountain_mass_value: float = _sample_normalized(_mountain_mass_noise, sample_x, sample_z) # Reads the broad internal mountain mass field.
@@ -131,7 +139,7 @@ func sample_height(world_x: float, world_z: float) -> float: # Returns the deter
     var valley_height: float = lerpf(height_after_primary_valley, secondary_carved_height, secondary_valley_weight) # Blends tributaries into plateaus, mountains, and major valleys.
     var valley_suppression: float = clampf(maxf(primary_valley_shape, secondary_valley_shape) * 0.82, 0.0, 1.0) # Suppresses noisy detail on broad valley floors.
     var surface_detail: float = _surface_detail_noise.get_noise_2d(sample_x, sample_z) * SURFACE_DETAIL_HEIGHT * (1.0 - valley_suppression) # Adds restrained local terrain relief away from smooth valley floors.
-    var full_height: float = valley_height + surface_detail # Resolves the complete monumental terrain hierarchy.
+    var full_height: float = _shape_underwater_height(valley_height, surface_detail, local_water_level) # Smooths and mildly flattens only terrain that lies below its exact local water band.
     var spawn_distance: float = Vector2(world_x, world_z).length() # Measures distance from the world-origin spawn centre.
     var spawn_blend: float = smoothstep(SPAWN_INNER_RADIUS, SPAWN_OUTER_RADIUS, spawn_distance) # Introduces monumental terrain gradually outside the safe start.
     var spawn_height: float = plateau_relief * 0.10 + surface_detail * 0.18 # Keeps the initial region gently varied without macro cliffs or mountains.
@@ -146,6 +154,24 @@ func _sample_broad_ridge_support(sample_x: float, sample_z: float, centre_ridge:
     var south_ridge: float = _sample_normalized(_mountain_ridge_noise, sample_x, sample_z + MOUNTAIN_WIDTH_SAMPLE_DISTANCE) # Samples ridge support to the south.
     var surrounding_average: float = (east_ridge + west_ridge + north_ridge + south_ridge) * 0.25 # Measures the broad ridge body independently of one centre-line maximum.
     return centre_ridge * 0.20 + surrounding_average * 0.80 # Lets surrounding width dominate while retaining a restrained contribution from the centre.
+
+func _get_local_water_level(regional_height: float) -> float: # Selects the same flat tiered water elevation used by the water-level sampler.
+    var water_coordinate: float = (regional_height - TerrainConfiguration.WATER_LEVEL_CLEARANCE - TerrainConfiguration.WATER_LEVEL_OFFSET) / TIER_HEIGHT # Finds the highest water band that remains safely below the surrounding region.
+    var water_tier_index: int = clampi(floori(water_coordinate), 0, TIER_LEVEL_COUNT - 1) # Restricts water to the six established world elevation tiers.
+    return float(water_tier_index) * TIER_HEIGHT + TerrainConfiguration.WATER_LEVEL_OFFSET # Returns the exact shared local water elevation.
+
+func _shape_underwater_height(base_terrain_height: float, surface_detail: float, water_level: float) -> float: # Reduces submerged roughness and relief without changing dry land or immediate shorelines.
+    var detailed_height: float = base_terrain_height + surface_detail # Resolves the original terrain height before underwater sediment-like smoothing.
+    if detailed_height >= water_level: # Detects land at or above the local water surface.
+        return detailed_height # Preserves every dry terrain height exactly.
+    var initial_depth: float = water_level - detailed_height # Measures depth before local surface detail is reduced.
+    var detail_fade: float = smoothstep(UNDERWATER_DETAIL_FADE_START_DEPTH, UNDERWATER_DETAIL_FADE_END_DEPTH, initial_depth) # Strengthens smoothing gradually after leaving the shoreline.
+    var detail_weight: float = lerpf(1.0, UNDERWATER_DETAIL_MINIMUM_WEIGHT, detail_fade) # Retains less high-frequency relief as depth increases.
+    var smoothed_height: float = base_terrain_height + surface_detail * detail_weight # Reduces only the local detail layer while preserving broad valleys and basins.
+    var smoothed_depth: float = maxf(water_level - smoothed_height, 0.0) # Recalculates positive water depth after local smoothing.
+    var flatten_weight: float = smoothstep(UNDERWATER_FLATTEN_START_DEPTH, UNDERWATER_FLATTEN_FULL_DEPTH, smoothed_depth) # Introduces mild broad relief compression away from shore.
+    var depth_scale: float = 1.0 - flatten_weight * UNDERWATER_MAXIMUM_DEPTH_COMPRESSION # Limits the final seabed flattening to the configured restrained maximum.
+    return water_level - smoothed_depth * depth_scale # Returns a slightly shallower, smoother submerged surface.
 
 func _get_tier_height(macro_elevation: float) -> float: # Converts a normalized macro value into continuous broad elevation shelves.
     var highest_tier_index: float = float(TIER_LEVEL_COUNT - 1) # Converts the number of shelf levels into the highest valid zero-based index.
