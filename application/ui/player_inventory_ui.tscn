@@ -1,0 +1,156 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://application/ui/player_inventory_ui.gd" id="1_inventory_ui"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_inventory_panel"]
+bg_color = Color(0.025, 0.028, 0.036, 0.97)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.25, 0.28, 0.34, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_weight_background"]
+bg_color = Color(0.018, 0.02, 0.026, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.14, 0.15, 0.18, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_weight_fill"]
+bg_color = Color(0.18, 0.62, 0.28, 1)
+corner_radius_top_left = 2
+corner_radius_top_right = 2
+corner_radius_bottom_right = 2
+corner_radius_bottom_left = 2
+
+[node name="PlayerInventoryUi" type="CanvasLayer"]
+process_mode = 3
+visible = false
+script = ExtResource("1_inventory_ui")
+
+[node name="Dimmer" type="ColorRect" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+color = Color(0, 0, 0, 0.42)
+
+[node name="InventoryPanel" type="PanelContainer" parent="."]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -360.0
+offset_top = -270.0
+offset_right = 360.0
+offset_bottom = 270.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_inventory_panel")
+
+[node name="ContentMargin" type="MarginContainer" parent="InventoryPanel"]
+layout_mode = 2
+mouse_filter = 0
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 16
+
+[node name="Layout" type="VBoxContainer" parent="InventoryPanel/ContentMargin"]
+layout_mode = 2
+mouse_filter = 0
+theme_override_constants/separation = 10
+
+[node name="Header" type="HBoxContainer" parent="InventoryPanel/ContentMargin/Layout"]
+layout_mode = 2
+mouse_filter = 0
+
+[node name="Title" type="Label" parent="InventoryPanel/ContentMargin/Layout/Header"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.96, 0.96, 0.98, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 24
+text = "INVENTORY"
+
+[node name="Spacer" type="Control" parent="InventoryPanel/ContentMargin/Layout/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="CloseHint" type="Label" parent="InventoryPanel/ContentMargin/Layout/Header"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.68, 0.7, 0.76, 1)
+theme_override_font_sizes/font_size = 13
+text = "I / ESC TO CLOSE"
+vertical_alignment = 1
+
+[node name="HeaderSeparator" type="HSeparator" parent="InventoryPanel/ContentMargin/Layout"]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="ItemTree" type="Tree" parent="InventoryPanel/ContentMargin/Layout"]
+custom_minimum_size = Vector2(0, 390)
+layout_mode = 2
+size_flags_vertical = 3
+focus_mode = 0
+mouse_filter = 0
+columns = 4
+column_titles_visible = true
+hide_root = true
+select_mode = 1
+allow_rmb_select = false
+scroll_horizontal_enabled = false
+theme_override_colors/font_color = Color(0.9, 0.91, 0.94, 1)
+theme_override_colors/font_selected_color = Color(1, 1, 1, 1)
+theme_override_colors/title_button_color = Color(0.86, 0.88, 0.92, 1)
+theme_override_font_sizes/font_size = 15
+theme_override_font_sizes/title_button_font_size = 13
+
+[node name="WeightSeparator" type="HSeparator" parent="InventoryPanel/ContentMargin/Layout"]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="WeightSummary" type="HBoxContainer" parent="InventoryPanel/ContentMargin/Layout"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 14
+
+[node name="WeightLabel" type="Label" parent="InventoryPanel/ContentMargin/Layout/WeightSummary"]
+custom_minimum_size = Vector2(245, 28)
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.94, 0.94, 0.96, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 15
+text = "WEIGHT  0.00 / 100.00 kg"
+vertical_alignment = 1
+
+[node name="WeightBar" type="ProgressBar" parent="InventoryPanel/ContentMargin/Layout/WeightSummary"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_styles/background = SubResource("StyleBoxFlat_weight_background")
+theme_override_styles/fill = SubResource("StyleBoxFlat_weight_fill")
+show_percentage = false
+value = 0.0
