@@ -23,6 +23,15 @@ const MOUNTAIN_WIDTH_EXCESS_START: float = 0.06 # Begins reducing a ridge when i
 const MOUNTAIN_WIDTH_EXCESS_END: float = 0.22 # Fully replaces unsupported narrow ridge maxima with the broad surrounding ridge level.
 const MOUNTAIN_WIDTH_SUPPORT_START: float = 0.38 # Prevents weak broad ridge fields from carrying full kilometre-scale relief.
 const MOUNTAIN_WIDTH_SUPPORT_END: float = 0.62 # Grants full ridge height only where a substantial surrounding mountain body exists.
+const CLIFF_REGION_START: float = 0.56 # Begins introducing flat-topped cliff geology inside selected broad mountain provinces.
+const CLIFF_REGION_END: float = 0.78 # Reserves complete cliff shaping for strongly selected geological regions.
+const CLIFF_SUPPORT_START: float = 0.46 # Requires a substantial broad ridge body before cliff walls can form.
+const CLIFF_SUPPORT_END: float = 0.68 # Grants complete cliff shaping only to wide well-supported mountain masses.
+const CLIFF_WALL_START: float = 0.48 # Starts the rapid vertical rise from the surrounding mountain foot.
+const CLIFF_WALL_END: float = 0.62 # Completes the wall over a narrow ridge interval to create a sheer cliff face.
+const CLIFF_CAP_HEIGHT_MINIMUM: float = 0.88 # Sets the lowest relative elevation used by a flat cliff cap.
+const CLIFF_CAP_HEIGHT_MAXIMUM: float = 0.93 # Keeps cap elevations high without converging into pointed summits.
+const CLIFF_CAP_UNDULATION_HEIGHT: float = 36.0 # Adds restrained broad variation across cliff tops so they remain geological rather than perfectly artificial.
 const PRIMARY_VALLEY_BASE_DEPTH: float = 700.0 # Gives the major valley network substantial depth even in lower regions.
 const PRIMARY_VALLEY_TIER_DEPTH: float = 1200.0 # Lets major valleys cut through several macro elevation tiers.
 const PRIMARY_VALLEY_MOUNTAIN_DEPTH: float = 850.0 # Allows long valleys to divide entire mountain systems.
@@ -46,6 +55,8 @@ var _mountain_mass_noise: FastNoiseLite # Controls the broad footprint of each m
 var _mountain_ridge_noise: FastNoiseLite # Produces the primary rounded mountain chain structure.
 var _mountain_detail_noise: FastNoiseLite # Produces secondary mountain shoulders and side ridges.
 var _mountain_terrace_noise: FastNoiseLite # Varies giant alpine shelf spacing and strength.
+var _cliff_region_noise: FastNoiseLite # Selects large geological regions where sheer mountains become flat-topped cliffs.
+var _cliff_cap_noise: FastNoiseLite # Adds restrained broad elevation variation across cliff-top plateaus.
 var _primary_valley_noise: FastNoiseLite # Produces the longest and deepest winding valley network.
 var _secondary_valley_noise: FastNoiseLite # Produces branching tributary valleys at a smaller scale.
 var _valley_width_noise: FastNoiseLite # Varies valley widths over long distances.
@@ -64,6 +75,8 @@ func _init() -> void: # Builds every deterministic noise source used by the terr
     _mountain_ridge_noise = _create_noise(83, 0.00026, 4, 0.5, 2.0, FastNoiseLite.FRACTAL_RIDGED) # Creates huge rounded primary ridges.
     _mountain_detail_noise = _create_noise(97, 0.00062, 3, 0.46, 2.0, FastNoiseLite.FRACTAL_RIDGED) # Creates large secondary shoulders without needle peaks.
     _mountain_terrace_noise = _create_noise(101, 0.00019, 3, 0.5, 2.0, FastNoiseLite.FRACTAL_FBM) # Varies giant alpine shelf structure.
+    _cliff_region_noise = _create_noise(107, 0.000075, 3, 0.52, 2.0, FastNoiseLite.FRACTAL_FBM) # Selects continent-scale cliff geology rather than converting every mountain.
+    _cliff_cap_noise = _create_noise(109, 0.00018, 2, 0.42, 2.0, FastNoiseLite.FRACTAL_FBM) # Creates slow restrained height changes across broad cliff tops.
     _primary_valley_noise = _create_noise(113, 0.00012, 4, 0.5, 2.0, FastNoiseLite.FRACTAL_FBM) # Creates long winding continent-scale valley centre lines.
     _secondary_valley_noise = _create_noise(127, 0.00029, 4, 0.5, 2.0, FastNoiseLite.FRACTAL_FBM) # Creates branching tributary valley lines.
     _valley_width_noise = _create_noise(139, 0.00008, 3, 0.5, 2.0, FastNoiseLite.FRACTAL_FBM) # Changes valley width gradually over several kilometres.
@@ -106,12 +119,25 @@ func sample_height(world_x: float, world_z: float) -> float: # Returns the deter
     var mountain_base: float = mountain_province_mask * mountain_mass_mask * MOUNTAIN_BASE_HEIGHT # Raises the complete broad mountain province.
     var mountain_ridge: float = mountain_province_mask * mountain_mass_mask * primary_ridge_shape * MOUNTAIN_RIDGE_HEIGHT # Adds primary relief only where broad width support exists.
     var mountain_shoulders: float = mountain_province_mask * mountain_mass_mask * secondary_ridge_shape * MOUNTAIN_SHOULDER_HEIGHT * summit_detail_weight # Adds supported side ridges without thin protrusions or summit spikes.
-    var mountain_height: float = (mountain_base + mountain_ridge + mountain_shoulders) * elevation_mountain_scale # Combines every mountain layer at the regional scale.
+    var organic_mountain_height: float = (mountain_base + mountain_ridge + mountain_shoulders) * elevation_mountain_scale # Combines the ordinary rounded mountain layers before geology-specific shaping.
+    var cliff_region_value: float = _sample_normalized(_cliff_region_noise, sample_x, sample_z) # Reads the large-scale selector for flat-topped cliff geology.
+    var cliff_region_mask: float = smoothstep(CLIFF_REGION_START, CLIFF_REGION_END, cliff_region_value) # Restricts cliff formations to coherent geological provinces.
+    var cliff_support_mask: float = smoothstep(CLIFF_SUPPORT_START, CLIFF_SUPPORT_END, broad_primary_ridge) * mountain_province_mask * mountain_mass_mask # Requires a broad mountain body so cliff formations cannot become thin towers.
+    var cliff_geology_mask: float = cliff_region_mask * cliff_support_mask # Selects supported mountains that should become sheer flat-topped formations.
+    var cliff_wall_profile: float = smoothstep(CLIFF_WALL_START, CLIFF_WALL_END, supported_primary_ridge) # Converts the ridge field into a narrow steep wall followed by a broad upper surface.
+    var cliff_cap_value: float = _sample_normalized(_cliff_cap_noise, sample_x, sample_z) # Reads slow cap-height variation across the formation.
+    var cliff_cap_ratio: float = lerpf(CLIFF_CAP_HEIGHT_MINIMUM, CLIFF_CAP_HEIGHT_MAXIMUM, cliff_cap_value) # Selects a high nearly level cap instead of a pointed summit.
+    var cliff_cap_height: float = (MOUNTAIN_BASE_HEIGHT + MOUNTAIN_RIDGE_HEIGHT * cliff_cap_ratio) * elevation_mountain_scale # Calculates the broad cliff-top elevation above the regional tier.
+    var cliff_cap_undulation: float = _cliff_cap_noise.get_noise_2d(sample_x, sample_z) * CLIFF_CAP_UNDULATION_HEIGHT # Adds only restrained broad relief across the cap.
+    var cliff_mountain_height: float = cliff_wall_profile * maxf(cliff_cap_height + cliff_cap_undulation, 0.0) # Builds a sheer wall with a flat gently varied top.
+    var mountain_height: float = lerpf(organic_mountain_height, cliff_mountain_height, cliff_geology_mask) # Uses cliffs for sheer geological regions and rounded mountains elsewhere.
     var mountain_terrace_value: float = _sample_normalized(_mountain_terrace_noise, sample_x, sample_z) # Reads the alpine shelf-control field.
     var mountain_terrace_step: float = MOUNTAIN_TERRACE_MINIMUM_STEP + mountain_terrace_value * MOUNTAIN_TERRACE_STEP_RANGE # Varies giant shelf spacing across ranges.
     var terraced_mountain_height: float = snappedf(mountain_height, mountain_terrace_step) # Produces broad alpine height bands before blending.
-    var mountain_terrace_strength: float = mountain_province_mask * mountain_mass_mask * lerpf(0.08, 0.20, mountain_terrace_value) # Keeps shelves visible without forming vertical walls.
-    mountain_height = lerpf(mountain_height, terraced_mountain_height, mountain_terrace_strength) # Blends giant shelves into the continuous mountain mass.
+    var ordinary_terrace_strength: float = mountain_province_mask * mountain_mass_mask * lerpf(0.08, 0.20, mountain_terrace_value) # Keeps shelves visible without forming vertical walls on ordinary mountains.
+    var cliff_terrace_strength: float = mountain_province_mask * mountain_mass_mask * lerpf(0.16, 0.28, mountain_terrace_value) # Gives cliff formations stronger Skyrim-like horizontal geological strata.
+    var mountain_terrace_strength: float = lerpf(ordinary_terrace_strength, cliff_terrace_strength, cliff_geology_mask) # Applies stronger layering only to flat-topped cliff geology.
+    mountain_height = lerpf(mountain_height, terraced_mountain_height, mountain_terrace_strength) # Blends giant shelves into both continuous mountains and stratified cliffs.
     var uncarved_height: float = base_height + mountain_height # Resolves the complete tiered and mountainous world before valley erosion.
     var valley_width_value: float = _sample_normalized(_valley_width_noise, sample_x, sample_z) # Reads slowly changing valley-width control.
     var primary_valley_width: float = lerpf(0.14, 0.30, valley_width_value) # Makes major valleys vary from broad corridors to immense basins.
