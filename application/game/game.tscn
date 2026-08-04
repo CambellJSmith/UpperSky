@@ -1,8 +1,9 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://application/game/game.gd" id="1_game"]
 [ext_resource type="PackedScene" path="res://world/environments/basic_world.tscn" id="2_world"]
 [ext_resource type="PackedScene" path="res://actors/player/first_person_player.tscn" id="3_player"]
+[ext_resource type="Script" path="res://application/debug/developer_console.gd" id="4_console"]
 
 [node name="Game" type="Node3D"]
 script = ExtResource("1_game")
@@ -12,3 +13,6 @@ script = ExtResource("1_game")
 [node name="DynamicEntities" type="Node3D" parent="."]
 
 [node name="Player" parent="DynamicEntities" instance=ExtResource("3_player")]
+
+[node name="DeveloperConsole" type="CanvasLayer" parent="."]
+script = ExtResource("4_console")
