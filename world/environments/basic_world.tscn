@@ -22,10 +22,10 @@ tonemap_mode = 2
 fog_enabled = true
 fog_light_color = Color(0.62, 0.71, 0.8, 1)
 fog_light_energy = 0.58
-fog_density = 0.0019
-fog_height = 24.0
-fog_height_density = 0.018
-fog_sky_affect = 0.42
+fog_density = 0.00032
+fog_height = 360.0
+fog_height_density = 0.0018
+fog_sky_affect = 0.36
 
 [node name="BasicWorld" type="Node3D"]
 
@@ -37,7 +37,7 @@ rotation_degrees = Vector3(-52, -32, 0)
 light_color = Color(1, 0.92, 0.8, 1)
 light_energy = 1.2
 shadow_enabled = true
-directional_shadow_max_distance = 720.0
+directional_shadow_max_distance = 2600.0
 
 [node name="Terrain" type="Node3D" parent="."]
 script = ExtResource("1_terrain")
