@@ -1,6 +1,6 @@
 extends Node3D # Owns and initializes the active world and player composition.
 
-const PLAYER_SPAWN_CHUNK_COORDINATE: Vector2i = Vector2i.ZERO # Identifies the terrain chunk used for the initial player start.
+const PLAYER_SPAWN_HORIZONTAL: Vector2 = Vector2.ZERO # Places the initial player start at the centre of the flat world-origin terrain stamp.
 const PLAYER_SPAWN_PROBE_DISTANCE: float = 512.0 # Starts the player collider high enough to sweep down onto any expected terrain elevation.
 const PLAYER_SPAWN_CLEARANCE: float = 0.08 # Leaves a small separation above the collision surface after the downward shape cast.
 const TERRAIN_COLLISION_MASK: int = 1 # Restricts spawn placement queries to the terrain physics layer.
@@ -17,9 +17,8 @@ func _ready() -> void: # Defers world initialization until every child node has 
 func _initialize_game() -> void: # Builds nearby collision and places the complete player capsule onto the resolved physical surface.
     _player.set_physics_process(false) # Prevents gravity and movement while terrain collision and spawn placement are unresolved.
     _player.velocity = Vector3.ZERO # Clears inherited movement before positioning the player for the downward collision query.
-    var spawn_horizontal: Vector2 = _get_player_spawn_horizontal() # Calculates a spawn point safely inside the selected terrain chunk.
-    var sampled_height: float = _terrain.get_height_at(spawn_horizontal) # Samples terrain only to establish a high collision-query starting point.
-    var provisional_position: Vector3 = Vector3(spawn_horizontal.x, sampled_height + PLAYER_SPAWN_PROBE_DISTANCE, spawn_horizontal.y) # Places the player collider well above the expected surface.
+    var sampled_height: float = _terrain.get_height_at(PLAYER_SPAWN_HORIZONTAL) # Samples terrain only to establish a high collision-query starting point.
+    var provisional_position: Vector3 = Vector3(PLAYER_SPAWN_HORIZONTAL.x, sampled_height + PLAYER_SPAWN_PROBE_DISTANCE, PLAYER_SPAWN_HORIZONTAL.y) # Places the player collider well above the expected surface.
     _player.global_position = provisional_position # Keeps the active player completely clear while terrain collision enters the physics space.
     _terrain.initialize(_player, _dynamic_entities) # Builds the initial collision neighbourhood and registers floating-origin participants.
     var resolved_position: Vector3 = await _resolve_player_spawn_position(provisional_position, sampled_height) # Sweeps the actual player capsule down against synchronized collision.
@@ -52,8 +51,3 @@ func _cast_player_toward_terrain(downward_motion: Vector3) -> float: # Queries h
     if cast_result.size() < 2: # Handles an invalid or unavailable query result defensively.
         return 1.0 # Reports no resolved collision so the caller can wait and retry.
     return cast_result[0] # Returns the documented maximum safe proportion of the requested motion.
-
-func _get_player_spawn_horizontal() -> Vector2: # Converts the selected spawn chunk into a point centred away from exposed chunk edges.
-    var chunk_origin: Vector2 = Vector2(PLAYER_SPAWN_CHUNK_COORDINATE) * TerrainConfiguration.CHUNK_SIZE # Calculates the selected chunk's horizontal world origin.
-    var chunk_centre_offset: Vector2 = Vector2.ONE * TerrainConfiguration.CHUNK_SIZE * 0.5 # Calculates the offset from the chunk origin to its centre.
-    return chunk_origin + chunk_centre_offset # Returns a stable spawn point fully surrounded by the chunk surface.

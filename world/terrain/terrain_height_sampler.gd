@@ -2,6 +2,9 @@ extends RefCounted # Provides a lightweight deterministic terrain-height service
 class_name TerrainHeightSampler # Makes the sampler available to terrain generation and future world tools.
 
 const WORLD_SEED: int = 742_913 # Keeps the generated landscape stable between playthroughs and builds.
+const SPAWN_FLAT_HEIGHT: float = 0.0 # Defines the exact world elevation of the circular initial spawn platform.
+const SPAWN_FLAT_RADIUS: float = 8.0 # Keeps several metres around world origin completely level for safe spawning.
+const SPAWN_FLAT_BLEND_RADIUS: float = 24.0 # Blends the flat platform smoothly into nearby procedural terrain.
 const SPAWN_INNER_RADIUS: float = 110.0 # Keeps the immediate starting area comparatively gentle and traversable.
 const SPAWN_OUTER_RADIUS: float = 320.0 # Blends the starting area into the full terrain profile over distance.
 const WARP_DISTANCE: float = 170.0 # Bends noise coordinates so landforms avoid obvious straight procedural bands.
@@ -67,10 +70,12 @@ func sample_height(world_x: float, world_z: float) -> float: # Returns the deter
     var crevasse_cut: float = pow(crevasse_line, 5.0) * CREVASSE_DEPTH * crevasse_region_mask # Carves steep narrow channels into the height field.
     var surface_detail: float = _surface_detail_noise.get_noise_2d(sample_x, sample_z) * 4.5 # Adds restrained close-range variation to the final surface.
     var full_height: float = continental_height + rolling_height + hill_detail + mountain_height - valley_cut - crevasse_cut + surface_detail # Combines every major and minor landform into one continuous height.
-    var spawn_distance: float = Vector2(world_x, world_z).length() # Measures distance from the initial player start.
+    var spawn_distance: float = Vector2(world_x, world_z).length() # Measures distance from the world-origin spawn centre.
     var spawn_blend: float = smoothstep(SPAWN_INNER_RADIUS, SPAWN_OUTER_RADIUS, spawn_distance) # Gradually introduces extreme landforms outside the starting area.
     var spawn_height: float = continental_height * 0.28 + rolling_height * 0.58 + hill_detail * 0.35 + surface_detail * 0.25 # Creates a gently varied but non-flat starting landscape.
-    return lerpf(spawn_height, full_height, spawn_blend) # Returns a safe start that transitions continuously into the full terrain system.
+    var procedural_height: float = lerpf(spawn_height, full_height, spawn_blend) # Resolves the ordinary gentle-to-complex terrain profile before the spawn stamp is applied.
+    var flat_blend: float = smoothstep(SPAWN_FLAT_RADIUS, SPAWN_FLAT_BLEND_RADIUS, spawn_distance) # Keeps the inner circle level and eases its edge into nearby terrain.
+    return lerpf(SPAWN_FLAT_HEIGHT, procedural_height, flat_blend) # Returns exact zero-height terrain near origin with a continuous outer transition.
 
 func _create_noise(seed_offset: int, frequency: float, octaves: int, gain: float, lacunarity: float, fractal_type: int) -> FastNoiseLite: # Creates one consistently configured noise resource.
     var noise: FastNoiseLite = FastNoiseLite.new() # Allocates an independent noise generator for one terrain role.
