@@ -2,6 +2,7 @@ extends Node3D # Streams deterministic procedural terrain and tiered water chunk
 class_name InfiniteTerrain # Makes the terrain controller available to the game composition root.
 
 const WATER_PRESENCE_EPSILON: float = 0.02 # Matches shoreline clipping tolerance when deciding whether a real water volume exists.
+const INVALID_WATER_CELL: Vector2i = Vector2i(2_147_483_647, 2_147_483_647) # Forces the first exact water query to populate its cell cache.
 
 var _height_sampler: TerrainHeightSampler # Supplies one continuous deterministic height function for every terrain chunk.
 var _mesh_builder: TerrainMeshBuilder # Converts height samples into seam-consistent renderable ground meshes.
@@ -12,11 +13,17 @@ var _water_material: StandardMaterial3D # Shades all generated water surfaces wi
 var _player: Node3D # Identifies the moving world subject that controls streaming.
 var _rebase_root: Node3D # Owns active world entities that must remain aligned when the floating origin moves.
 var _world_origin_offset: Vector2 = Vector2.ZERO # Tracks the absolute world coordinate represented by local scene origin.
-var _current_chunk_coordinate: Vector2i = Vector2i(2_147_483_647, 2_147_483_647) # Forces the first streaming refresh after initialization.
+var _current_chunk_coordinate: Vector2i = INVALID_WATER_CELL # Forces the first streaming refresh after initialization.
 var _chunks: Dictionary[Vector2i, TerrainChunk] = {} # Stores every currently loaded terrain and water chunk by world-grid coordinate.
 var _desired_chunks: Dictionary[Vector2i, bool] = {} # Stores the current visible streaming set around the player.
 var _pending_chunks: Array[Vector2i] = [] # Holds missing chunks in near-to-far generation order.
 var _pending_chunk_index: int = 0 # Tracks the next queued coordinate without shifting the array on every build.
+var _water_query_cell_coordinate: Vector2i = INVALID_WATER_CELL # Stores the last exact water cell sampled for gameplay and view effects.
+var _water_query_level: float = 0.0 # Caches the rendered flat level assigned to the active water cell.
+var _water_query_top_left_height: float = 0.0 # Caches the terrain height at the active cell's back-left corner.
+var _water_query_top_right_height: float = 0.0 # Caches the terrain height at the active cell's back-right corner.
+var _water_query_bottom_left_height: float = 0.0 # Caches the terrain height at the active cell's forward-left corner.
+var _water_query_bottom_right_height: float = 0.0 # Caches the terrain height at the active cell's forward-right corner.
 
 func _ready() -> void: # Creates reusable terrain and water resources before the game composition root initializes the player.
     _height_sampler = TerrainHeightSampler.new() # Creates the deterministic world-height service.
@@ -52,18 +59,13 @@ func get_height_at(world_position: Vector2) -> float: # Exposes the authoritativ
     return _height_sampler.sample_height(world_position.x, world_position.y) # Samples the same function used by every generated terrain mesh vertex.
 
 func get_water_level_at(world_position: Vector2) -> float: # Exposes the exact flat water-cell level used by rendering and gameplay systems.
-    var water_cell_count: int = TerrainConfiguration.WATER_RESOLUTION - 1 # Calculates the number of water cells along one terrain chunk axis.
-    var water_cell_size: float = TerrainConfiguration.CHUNK_SIZE / float(water_cell_count) # Matches the cell size used by the water mesh builder.
-    var cell_x: int = floori(world_position.x / water_cell_size) # Finds the globally stable water-cell column, including negative coordinates.
-    var cell_z: int = floori(world_position.y / water_cell_size) # Finds the globally stable water-cell row, including negative coordinates.
-    var sample_x: float = (float(cell_x) + 0.5) * water_cell_size # Reconstructs the exact x centre sampled when generating this rendered cell.
-    var sample_z: float = (float(cell_z) + 0.5) * water_cell_size # Reconstructs the exact z centre sampled when generating this rendered cell.
-    return _water_level_sampler.sample_water_level(sample_x, sample_z) # Returns the same deterministic level assigned to the visible water polygon.
+    _update_water_query_cache(world_position) # Populates the active rendered-cell data only when the query crosses a cell boundary.
+    return _water_query_level # Returns the same deterministic level assigned to the visible water polygon.
 
 func has_water_at(world_position: Vector2) -> bool: # Reports whether the clipped water mesh occupies one absolute horizontal position.
-    var rendered_terrain_height: float = _sample_water_grid_terrain_height(world_position) # Reconstructs the linearly interpolated terrain surface used by water clipping.
-    var water_level: float = get_water_level_at(world_position) # Reads the exact flat level owned by the visible water cell.
-    return rendered_terrain_height < water_level - WATER_PRESENCE_EPSILON # Matches shoreline clipping so dry high ground never behaves as water.
+    _update_water_query_cache(world_position) # Ensures the exact rendered cell level and corner heights are available.
+    var rendered_terrain_height: float = _sample_cached_water_grid_terrain_height(world_position) # Reconstructs the linearly interpolated terrain surface used by water clipping.
+    return rendered_terrain_height < _water_query_level - WATER_PRESENCE_EPSILON # Matches shoreline clipping so dry high ground never behaves as water.
 
 func local_to_world_position(local_position: Vector3) -> Vector3: # Converts a near-origin scene position into a stable absolute procedural-world position.
     return Vector3(local_position.x + _world_origin_offset.x, local_position.y, local_position.z + _world_origin_offset.y) # Adds the accumulated horizontal world offset without changing elevation.
@@ -74,22 +76,33 @@ func world_to_local_position(world_position: Vector3) -> Vector3: # Converts a s
 func get_loaded_chunk_count() -> int: # Reports the current loaded chunk count for profiling and future diagnostics.
     return _chunks.size() # Returns the number of visual chunk nodes currently retained.
 
-func _sample_water_grid_terrain_height(world_position: Vector2) -> float: # Reconstructs the exact coarse triangle surface used to clip rendered water.
+func _update_water_query_cache(world_position: Vector2) -> void: # Caches one exact rendered water cell so continuous player queries avoid repeated terrain generation.
+    var water_cell_count: int = TerrainConfiguration.WATER_RESOLUTION - 1 # Calculates the number of water cells along one terrain chunk axis.
+    var water_cell_size: float = TerrainConfiguration.CHUNK_SIZE / float(water_cell_count) # Matches the cell size used by the water mesh builder.
+    var cell_coordinate: Vector2i = Vector2i(floori(world_position.x / water_cell_size), floori(world_position.y / water_cell_size)) # Finds the globally stable rendered water cell, including negative coordinates.
+    if cell_coordinate == _water_query_cell_coordinate: # Detects repeated player and camera queries inside the same cell.
+        return # Reuses the cached level and four terrain corners without running procedural noise again.
+    _water_query_cell_coordinate = cell_coordinate # Stores the new active cell before populating its deterministic data.
+    var cell_origin_x: float = float(cell_coordinate.x) * water_cell_size # Calculates the absolute x coordinate of the cell's back-left corner.
+    var cell_origin_z: float = float(cell_coordinate.y) * water_cell_size # Calculates the absolute z coordinate of the cell's back-left corner.
+    var level_sample_x: float = cell_origin_x + water_cell_size * 0.5 # Reconstructs the exact x centre sampled by water mesh generation.
+    var level_sample_z: float = cell_origin_z + water_cell_size * 0.5 # Reconstructs the exact z centre sampled by water mesh generation.
+    _water_query_level = _water_level_sampler.sample_water_level(level_sample_x, level_sample_z) # Caches the exact flat level owned by the rendered cell.
+    _water_query_top_left_height = _height_sampler.sample_height(cell_origin_x, cell_origin_z) # Caches the back-left terrain corner used by water clipping.
+    _water_query_top_right_height = _height_sampler.sample_height(cell_origin_x + water_cell_size, cell_origin_z) # Caches the back-right terrain corner used by water clipping.
+    _water_query_bottom_left_height = _height_sampler.sample_height(cell_origin_x, cell_origin_z + water_cell_size) # Caches the forward-left terrain corner used by water clipping.
+    _water_query_bottom_right_height = _height_sampler.sample_height(cell_origin_x + water_cell_size, cell_origin_z + water_cell_size) # Caches the forward-right terrain corner used by water clipping.
+
+func _sample_cached_water_grid_terrain_height(world_position: Vector2) -> float: # Interpolates the active cached terrain triangle exactly as the rendered water clipper does.
     var water_cell_count: int = TerrainConfiguration.WATER_RESOLUTION - 1 # Calculates the water grid cell count shared with mesh generation.
     var water_cell_size: float = TerrainConfiguration.CHUNK_SIZE / float(water_cell_count) # Calculates the world size of one rendered water cell.
-    var cell_x: int = floori(world_position.x / water_cell_size) # Locates the globally stable cell column containing the query point.
-    var cell_z: int = floori(world_position.y / water_cell_size) # Locates the globally stable cell row containing the query point.
-    var cell_origin_x: float = float(cell_x) * water_cell_size # Calculates the absolute x coordinate of the cell's back-left corner.
-    var cell_origin_z: float = float(cell_z) * water_cell_size # Calculates the absolute z coordinate of the cell's back-left corner.
+    var cell_origin_x: float = float(_water_query_cell_coordinate.x) * water_cell_size # Reconstructs the cached cell's absolute x origin.
+    var cell_origin_z: float = float(_water_query_cell_coordinate.y) * water_cell_size # Reconstructs the cached cell's absolute z origin.
     var local_x: float = clampf((world_position.x - cell_origin_x) / water_cell_size, 0.0, 1.0) # Converts the query x coordinate into cell-local interpolation space.
     var local_z: float = clampf((world_position.y - cell_origin_z) / water_cell_size, 0.0, 1.0) # Converts the query z coordinate into cell-local interpolation space.
-    var top_left_height: float = _height_sampler.sample_height(cell_origin_x, cell_origin_z) # Samples the same back-left terrain corner used by water clipping.
-    var top_right_height: float = _height_sampler.sample_height(cell_origin_x + water_cell_size, cell_origin_z) # Samples the same back-right terrain corner used by water clipping.
-    var bottom_left_height: float = _height_sampler.sample_height(cell_origin_x, cell_origin_z + water_cell_size) # Samples the same forward-left terrain corner used by water clipping.
-    var bottom_right_height: float = _height_sampler.sample_height(cell_origin_x + water_cell_size, cell_origin_z + water_cell_size) # Samples the same forward-right terrain corner used by water clipping.
     if local_x + local_z <= 1.0: # Selects the first triangle matching the terrain and water mesh diagonal.
-        return top_left_height + local_x * (top_right_height - top_left_height) + local_z * (bottom_left_height - top_left_height) # Interpolates height across the back-left triangle.
-    return bottom_right_height + (1.0 - local_z) * (top_right_height - bottom_right_height) + (1.0 - local_x) * (bottom_left_height - bottom_right_height) # Interpolates height across the forward-right triangle.
+        return _water_query_top_left_height + local_x * (_water_query_top_right_height - _water_query_top_left_height) + local_z * (_water_query_bottom_left_height - _water_query_top_left_height) # Interpolates height across the back-left triangle.
+    return _water_query_bottom_right_height + (1.0 - local_z) * (_water_query_top_right_height - _water_query_bottom_right_height) + (1.0 - local_x) * (_water_query_bottom_left_height - _water_query_bottom_right_height) # Interpolates height across the forward-right triangle.
 
 func _refresh_streaming_set(centre: Vector2i) -> void: # Recalculates all chunks required around a new streaming centre.
     _desired_chunks.clear() # Removes coordinates from the previous streaming set.
