@@ -1,10 +1,11 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://application/game/game.gd" id="1_game"]
 [ext_resource type="PackedScene" path="res://world/environments/basic_world.tscn" id="2_world"]
 [ext_resource type="PackedScene" path="res://actors/player/first_person_player.tscn" id="3_player"]
 [ext_resource type="Script" path="res://application/debug/developer_console.gd" id="4_console"]
 [ext_resource type="Script" path="res://application/effects/underwater_view.gd" id="5_underwater"]
+[ext_resource type="PackedScene" path="res://application/ui/player_status_hud.tscn" id="6_status_hud"]
 
 [node name="Game" type="Node3D"]
 script = ExtResource("1_game")
@@ -17,6 +18,8 @@ script = ExtResource("1_game")
 
 [node name="UnderwaterView" type="CanvasLayer" parent="."]
 script = ExtResource("5_underwater")
+
+[node name="PlayerStatusHud" parent="." instance=ExtResource("6_status_hud")]
 
 [node name="DeveloperConsole" type="CanvasLayer" parent="."]
 script = ExtResource("4_console")
