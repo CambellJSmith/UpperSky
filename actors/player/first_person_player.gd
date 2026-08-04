@@ -13,6 +13,11 @@ const SWIM_ACCELERATION: float = 16.0 # Keeps faster swimming responsive while r
 const SWIM_BODY_SAMPLE_HEIGHT: float = 0.9 # Tests immersion at the capsule centre rather than at the player's feet.
 const SWIM_SURFACE_ROOT_DEPTH: float = 1.48 # Buoys the player toward a root height that leaves the camera close to the surface.
 const SWIM_BUOYANCY_RESPONSE: float = 0.65 # Converts displacement from the preferred floating depth into vertical swim input.
+const SPRINT_STAMINA_DRAIN_PER_SECOND: float = 18.0 # Lets a full default stamina pool sustain continuous sprinting for a little over five seconds.
+const SWIM_STAMINA_DRAIN_PER_SECOND: float = 10.0 # Applies a lower sustained cost to ordinary player-directed swimming.
+const FAST_SWIM_STAMINA_DRAIN_PER_SECOND: float = 18.0 # Makes accelerated horizontal swimming cost the same stamina rate as land sprinting.
+const STAMINA_REGENERATION_PER_SECOND: float = 16.0 # Restores a full default stamina pool in a little over six seconds after recovery begins.
+const STAMINA_REGENERATION_DELAY: float = 1.25 # Prevents stamina from immediately refilling between brief exertion inputs.
 const FLY_SPEED: float = 35.0 # Provides useful traversal speed across the monumental terrain while fly mode is active.
 const FLY_SPRINT_SPEED: float = 120.0 # Provides accelerated developer traversal while the ordinary sprint input is held.
 const FLY_ACCELERATION: float = 70.0 # Controls how quickly collision-free movement reaches its requested velocity.
@@ -21,6 +26,7 @@ const CONTROLLER_LOOK_SPEED: float = 2.6 # Converts right-stick input into camer
 const MINIMUM_PITCH: float = deg_to_rad(-89.0) # Prevents the camera from rotating beyond straight down.
 const MAXIMUM_PITCH: float = deg_to_rad(89.0) # Prevents the camera from rotating beyond straight up.
 
+@onready var _vitals: PlayerVitals = $PlayerVitals # Stores the authoritative stamina pool displayed by the HUD and used by inventory capacity.
 @onready var _collision_shape: CollisionShape3D = $CollisionShape3D # Stores the capsule node used for movement and spawn placement queries.
 @onready var _head: Node3D = $Head # Stores the pivot used for vertical camera rotation.
 @onready var _camera: Camera3D = $Head/Camera3D # Stores the rendered camera used by underwater view testing.
@@ -32,6 +38,8 @@ var _gameplay_input_enabled: bool = true # Prevents movement and look input whil
 var _fly_mode_enabled: bool = false # Tracks whether gravity and collision-free flight are active.
 var _swimming_enabled: bool = false # Tracks whether the body centre currently occupies a real generated water volume.
 var _current_water_level: float = 0.0 # Stores the active local water surface used for buoyancy and vertical movement.
+var _stamina_exertion_this_frame: bool = false # Tracks whether sprint or active swimming should suppress stamina regeneration this physics frame.
+var _stamina_regeneration_delay_remaining: float = 0.0 # Stores the remaining recovery delay after the most recent stamina-consuming action.
 var _initial_collision_layer: int = 0 # Retains the authored collision layer for restoration after fly mode.
 var _initial_collision_mask: int = 0 # Retains the authored collision mask for restoration after fly mode.
 var _initial_motion_mode: int = CharacterBody3D.MOTION_MODE_GROUNDED # Retains the authored grounded motion mode for restoration after swimming or flight.
@@ -99,18 +107,20 @@ func _unhandled_input(event: InputEvent) -> void: # Handles camera input after i
         _toggle_mouse_capture() # Switches between captured and visible mouse modes.
         get_viewport().set_input_as_handled() # Prevents the capture-toggle input from reaching unrelated nodes.
 
-func _physics_process(delta: float) -> void: # Advances walking, swimming, or fly movement using the fixed physics timestep.
+func _physics_process(delta: float) -> void: # Advances movement and stamina using the fixed physics timestep.
+    _stamina_exertion_this_frame = false # Resets exertion before the active movement mode records any sprinting or player-directed swimming.
     if _gameplay_input_enabled: # Checks whether look input should currently control the view.
         _apply_controller_look(delta) # Applies right-stick camera movement independently from mouse events.
     _update_water_state() # Resolves body immersion from the same terrain and water fields used by rendered geometry.
     if _fly_mode_enabled: # Selects collision-free three-dimensional movement when requested by the console.
-        _apply_fly_movement(delta) # Applies horizontal, vertical, and accelerated developer flight.
+        _apply_fly_movement(delta) # Applies horizontal, vertical, and accelerated developer flight without stamina cost.
     elif _swimming_enabled: # Selects buoyant collision-aware movement while the body occupies real water.
-        _apply_swim_movement(delta) # Applies water drag, horizontal swimming, ascent, descent, and surface buoyancy.
+        _apply_swim_movement(delta) # Applies water drag, movement, stamina drain, and surface buoyancy.
     else: # Uses ordinary gravity and floor movement outside water and fly mode.
         _apply_vertical_movement(delta) # Applies gravity and jump input to the vertical velocity.
-        _apply_horizontal_movement(delta) # Accelerates horizontal velocity toward the requested movement direction.
+        _apply_horizontal_movement(delta) # Accelerates horizontal velocity and spends stamina while sprinting.
     move_and_slide() # Moves using terrain collision during walking and swimming, or no collision during fly mode.
+    _update_stamina_regeneration(delta) # Restores stamina only after the active exertion mode and recovery delay have ended.
 
 func _update_water_state() -> void: # Determines whether the player's body centre is inside an actual generated water volume.
     if _terrain == null or _fly_mode_enabled: # Waits for environment initialization and lets fly mode take priority over water.
@@ -148,7 +158,7 @@ func _apply_vertical_movement(delta: float) -> void: # Updates jumping and gravi
         return # Skips gravity while grounded for stable movement.
     velocity.y -= _gravity * delta # Applies gravity while the player is airborne, including while the console is open.
 
-func _apply_horizontal_movement(delta: float) -> void: # Updates movement along the ground plane.
+func _apply_horizontal_movement(delta: float) -> void: # Updates movement along the ground plane and spends stamina for active sprinting.
     var movement_input: Vector2 = Vector2.ZERO # Defaults to no requested movement while gameplay input is unavailable.
     if _gameplay_input_enabled: # Checks whether keyboard or controller movement should be read.
         movement_input = Input.get_vector("StickLeft_West", "StickLeft_East", "StickLeft_North", "StickLeft_South") # Reads normalized keyboard or left-stick movement.
@@ -157,14 +167,15 @@ func _apply_horizontal_movement(delta: float) -> void: # Updates movement along 
     world_direction.y = 0.0 # Removes any vertical component introduced by future transform changes.
     world_direction = world_direction.normalized() # Keeps diagonal movement at the same speed as cardinal movement.
     var movement_speed: float = WALK_SPEED # Selects normal walking as the default movement speed.
-    if _gameplay_input_enabled and Input.is_action_pressed("StickLeft_Click"): # Checks whether the sprint action is being held during gameplay input.
-        movement_speed = SPRINT_SPEED # Uses the faster sprint speed while the action remains pressed.
+    var sprint_requested: bool = _gameplay_input_enabled and not movement_input.is_zero_approx() and Input.is_action_pressed("StickLeft_Click") # Requires both movement and the sprint action so standing still does not drain stamina.
+    if sprint_requested and _consume_stamina(SPRINT_STAMINA_DRAIN_PER_SECOND, delta): # Spends stamina before granting the faster movement target.
+        movement_speed = SPRINT_SPEED # Uses sprint speed only while the current stamina pool can supply the action.
     var target_velocity: Vector3 = world_direction * movement_speed # Calculates the requested horizontal velocity.
     var acceleration: float = GROUND_ACCELERATION if is_on_floor() else AIR_ACCELERATION # Uses responsive ground movement and restricted air control.
     velocity.x = move_toward(velocity.x, target_velocity.x, acceleration * delta) # Smoothly approaches the requested horizontal velocity on the x axis.
     velocity.z = move_toward(velocity.z, target_velocity.z, acceleration * delta) # Smoothly approaches the requested horizontal velocity on the z axis.
 
-func _apply_swim_movement(delta: float) -> void: # Updates collision-aware movement, water drag, and buoyancy inside a real water volume.
+func _apply_swim_movement(delta: float) -> void: # Updates collision-aware movement, stamina drain, water drag, and buoyancy inside a real water volume.
     var movement_input: Vector2 = Vector2.ZERO # Defaults to no horizontal swim input while gameplay controls are unavailable.
     var vertical_input: float = 0.0 # Defaults to neutral buoyant movement before explicit ascent or descent input.
     if _gameplay_input_enabled: # Checks whether the player currently owns swim controls.
@@ -173,13 +184,20 @@ func _apply_swim_movement(delta: float) -> void: # Updates collision-aware movem
             vertical_input += 1.0 # Requests upward swimming.
         if Input.is_action_pressed("Button_B"): # Uses Control or the secondary controller button for descent.
             vertical_input -= 1.0 # Requests downward swimming.
+    var player_directed_swimming: bool = not movement_input.is_zero_approx() or not is_zero_approx(vertical_input) # Distinguishes active swimming from passive surface buoyancy.
     var local_direction: Vector3 = Vector3(movement_input.x, 0.0, movement_input.y) # Converts horizontal swim input into the player's local yaw frame.
     var world_direction: Vector3 = global_transform.basis * local_direction # Rotates swimming so forward follows the player's facing direction.
     world_direction.y = 0.0 # Keeps horizontal swimming independent from camera pitch and terrain slope.
     world_direction = world_direction.normalized() # Keeps diagonal horizontal swimming at a consistent speed.
     var movement_speed: float = SWIM_SPEED # Selects ordinary swimming speed by default.
-    if _gameplay_input_enabled and Input.is_action_pressed("StickLeft_Click"): # Reuses the sprint action for faster swimming.
-        movement_speed = SWIM_SPRINT_SPEED # Applies the stronger swim pace while sprint remains held.
+    var fast_swim_requested: bool = player_directed_swimming and not movement_input.is_zero_approx() and Input.is_action_pressed("StickLeft_Click") # Restricts faster swimming to active horizontal movement while sprint is held.
+    var fast_swimming: bool = false # Tracks whether the current frame successfully paid for accelerated swimming.
+    if fast_swim_requested: # Detects an attempt to use the faster swimming pace.
+        fast_swimming = _consume_stamina(FAST_SWIM_STAMINA_DRAIN_PER_SECOND, delta) # Pays the higher stamina cost and reports whether acceleration is available.
+    if fast_swimming: # Checks whether the stamina pool supported accelerated swimming this frame.
+        movement_speed = SWIM_SPRINT_SPEED # Applies the stronger horizontal swim pace.
+    elif player_directed_swimming: # Handles ordinary horizontal or vertical swimming, including fallback after stamina exhaustion.
+        _consume_stamina(SWIM_STAMINA_DRAIN_PER_SECOND, delta) # Drains ordinary swim stamina and suppresses recovery even when the pool is already empty.
     var target_velocity: Vector3 = world_direction * movement_speed # Calculates the requested horizontal water velocity.
     if is_zero_approx(vertical_input): # Detects whether buoyancy should control vertical movement instead of direct input.
         var player_world_position: Vector3 = _terrain.local_to_world_position(global_position) # Reads the stable root elevation for surface floating.
@@ -187,6 +205,25 @@ func _apply_swim_movement(delta: float) -> void: # Updates collision-aware movem
         vertical_input = clampf((preferred_root_height - player_world_position.y) * SWIM_BUOYANCY_RESPONSE, -1.0, 1.0) # Converts displacement into gentle upward or downward buoyancy.
     target_velocity.y = vertical_input * SWIM_VERTICAL_SPEED # Applies explicit vertical swimming or automatic surface buoyancy.
     velocity = velocity.move_toward(target_velocity, SWIM_ACCELERATION * delta) # Uses water resistance to approach the requested three-dimensional movement smoothly.
+
+func _consume_stamina(drain_per_second: float, delta: float) -> bool: # Records exertion and spends stamina for one fixed-timestep movement action.
+    if drain_per_second <= 0.0 or delta <= 0.0: # Rejects invalid rates or timesteps without changing recovery state.
+        return false # Reports that no stamina-backed action can be granted.
+    _stamina_exertion_this_frame = true # Suppresses regeneration while the player continues attempting the exerting action.
+    _stamina_regeneration_delay_remaining = STAMINA_REGENERATION_DELAY # Restarts recovery delay on every sprint or active-swim frame.
+    if _vitals == null or not _vitals.has_stamina(): # Detects a missing model or an exhausted stamina pool.
+        return false # Denies sprint-speed movement while preserving ordinary movement and swimming.
+    return _vitals.consume_stamina(drain_per_second * delta) > 0.0 # Spends this frame's stamina and grants the action when any stamina was available.
+
+func _update_stamina_regeneration(delta: float) -> void: # Restores stamina after exertion stops and the configured recovery delay expires.
+    if _vitals == null or delta <= 0.0: # Waits for a valid resource model and positive physics timestep.
+        return # Leaves stamina unchanged when recovery cannot be calculated safely.
+    if _stamina_exertion_this_frame: # Detects sprinting or active swimming during the current physics frame.
+        return # Keeps the restarted delay intact and prevents simultaneous drain and recovery.
+    if _stamina_regeneration_delay_remaining > 0.0: # Detects the post-exertion recovery delay.
+        _stamina_regeneration_delay_remaining = maxf(_stamina_regeneration_delay_remaining - delta, 0.0) # Counts down without crossing below zero.
+        return # Defers regeneration until a later frame after the delay reaches zero.
+    _vitals.restore_stamina(STAMINA_REGENERATION_PER_SECOND * delta) # Refills the authoritative stamina pool and lets the HUD update through its revision polling.
 
 func _apply_fly_movement(delta: float) -> void: # Updates collision-free horizontal and vertical developer flight.
     var movement_input: Vector2 = Vector2.ZERO # Defaults to no horizontal flight while the console owns input.
