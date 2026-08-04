@@ -67,6 +67,10 @@ Button_A={
 "deadzone": 0.2,
 "events": [Object(InputEventKey,"physical_keycode":32,"unicode":32), Object(InputEventJoypadButton,"button_index":0)]
 }
+Button_B={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":4194326), Object(InputEventJoypadButton,"button_index":1)]
+}
 Button_Start={
 "deadzone": 0.2,
 "events": [Object(InputEventKey,"physical_keycode":4194305), Object(InputEventJoypadButton,"button_index":6)]
