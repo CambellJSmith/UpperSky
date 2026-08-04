@@ -18,6 +18,11 @@ const MOUNTAIN_RIDGE_HEIGHT: float = 2300.0 # Builds kilometre-scale primary rid
 const MOUNTAIN_SHOULDER_HEIGHT: float = 620.0 # Adds substantial secondary ridges and traversable mountain shoulders.
 const MOUNTAIN_TERRACE_MINIMUM_STEP: float = 110.0 # Creates giant alpine shelves instead of small repetitive steps.
 const MOUNTAIN_TERRACE_STEP_RANGE: float = 90.0 # Varies shelf spacing across different mountain provinces.
+const MOUNTAIN_WIDTH_SAMPLE_DISTANCE: float = 520.0 # Measures ridge support more than a kilometre across before allowing extreme mountain relief.
+const MOUNTAIN_WIDTH_EXCESS_START: float = 0.06 # Begins reducing a ridge when its centre rises noticeably above its broad surroundings.
+const MOUNTAIN_WIDTH_EXCESS_END: float = 0.22 # Fully replaces unsupported narrow ridge maxima with the broad surrounding ridge level.
+const MOUNTAIN_WIDTH_SUPPORT_START: float = 0.38 # Prevents weak broad ridge fields from carrying full kilometre-scale relief.
+const MOUNTAIN_WIDTH_SUPPORT_END: float = 0.62 # Grants full ridge height only where a substantial surrounding mountain body exists.
 const PRIMARY_VALLEY_BASE_DEPTH: float = 700.0 # Gives the major valley network substantial depth even in lower regions.
 const PRIMARY_VALLEY_TIER_DEPTH: float = 1200.0 # Lets major valleys cut through several macro elevation tiers.
 const PRIMARY_VALLEY_MOUNTAIN_DEPTH: float = 850.0 # Allows long valleys to divide entire mountain systems.
@@ -83,18 +88,24 @@ func sample_height(world_x: float, world_z: float) -> float: # Returns the deter
     var mountain_province_value: float = _sample_normalized(_mountain_province_noise, sample_x, sample_z) # Reads the mountain-province placement field.
     var mountain_province_mask: float = smoothstep(0.44, 0.72, mountain_province_value) # Restricts mountains to large coherent provinces.
     var mountain_mass_value: float = _sample_normalized(_mountain_mass_noise, sample_x, sample_z) # Reads the broad internal mountain mass field.
-    var mountain_mass_mask: float = smoothstep(0.36, 0.84, mountain_mass_value) # Gives each province a broad rise before ridge detail.
+    var mountain_mass_mask: float = smoothstep(0.30, 0.78, mountain_mass_value) # Widens the complete mountain body before any ridge relief is allowed above it.
     var primary_ridge_value: float = _sample_normalized(_mountain_ridge_noise, sample_x, sample_z) # Reads the primary ridged mountain field.
+    var broad_primary_ridge: float = _sample_broad_ridge_support(sample_x, sample_z, primary_ridge_value) # Measures whether the ridge remains elevated across a kilometre-scale surrounding area.
+    var unsupported_ridge_excess: float = maxf(primary_ridge_value - broad_primary_ridge, 0.0) # Detects narrow centre-line protrusions above the broad ridge body.
+    var ridge_width_weight: float = 1.0 - smoothstep(MOUNTAIN_WIDTH_EXCESS_START, MOUNTAIN_WIDTH_EXCESS_END, unsupported_ridge_excess) # Removes relief progressively as a ridge becomes too thin.
+    var supported_primary_ridge: float = lerpf(broad_primary_ridge, primary_ridge_value, ridge_width_weight) # Preserves broad ridges while replacing thin peaks with their surrounding support level.
+    var broad_ridge_support: float = smoothstep(MOUNTAIN_WIDTH_SUPPORT_START, MOUNTAIN_WIDTH_SUPPORT_END, broad_primary_ridge) # Requires a substantial surrounding ridge field before granting full mountain height.
     var secondary_ridge_value: float = _sample_normalized(_mountain_detail_noise, sample_x, sample_z) # Reads the secondary ridged mountain field.
-    var rounded_primary_ridge: float = sin(primary_ridge_value * PI * 0.5) # Gives primary ridges a zero-slope rounded crest instead of a needle maximum.
+    var rounded_primary_ridge: float = sin(supported_primary_ridge * PI * 0.5) # Gives width-supported primary ridges a zero-slope rounded crest.
     var rounded_secondary_ridge: float = sin(secondary_ridge_value * PI * 0.5) # Rounds secondary ridge maxima before they influence height.
-    var primary_ridge_shape: float = pow(rounded_primary_ridge, 1.48) # Keeps immense ridges broad while preserving dramatic relief.
-    var secondary_ridge_shape: float = pow(rounded_secondary_ridge, 2.05) # Restricts secondary relief to substantial shoulders and side ridges.
+    var primary_ridge_shape: float = pow(rounded_primary_ridge, 1.48) * broad_ridge_support # Allows extreme primary relief only where the ridge has kilometre-scale width.
+    var secondary_width_support: float = lerpf(0.25, 1.0, broad_ridge_support) * ridge_width_weight # Prevents secondary shoulders from rebuilding narrow protrusions beside a suppressed primary ridge.
+    var secondary_ridge_shape: float = pow(rounded_secondary_ridge, 2.05) * secondary_width_support # Restricts secondary relief to supported mountain shoulders and side ridges.
     var summit_detail_weight: float = 1.0 - smoothstep(SUMMIT_DETAIL_FADE_START, SUMMIT_DETAIL_FADE_END, rounded_primary_ridge) # Removes secondary detail near primary summits.
     var elevation_mountain_scale: float = lerpf(0.86, 1.24, macro_elevation) # Makes mountain provinces even larger on upper world tiers.
-    var mountain_base: float = mountain_province_mask * mountain_mass_mask * MOUNTAIN_BASE_HEIGHT # Raises the complete mountain province.
-    var mountain_ridge: float = mountain_province_mask * mountain_mass_mask * primary_ridge_shape * MOUNTAIN_RIDGE_HEIGHT # Adds the kilometre-scale primary ridge.
-    var mountain_shoulders: float = mountain_province_mask * mountain_mass_mask * secondary_ridge_shape * MOUNTAIN_SHOULDER_HEIGHT * summit_detail_weight # Adds large side ridges without summit spikes.
+    var mountain_base: float = mountain_province_mask * mountain_mass_mask * MOUNTAIN_BASE_HEIGHT # Raises the complete broad mountain province.
+    var mountain_ridge: float = mountain_province_mask * mountain_mass_mask * primary_ridge_shape * MOUNTAIN_RIDGE_HEIGHT # Adds primary relief only where broad width support exists.
+    var mountain_shoulders: float = mountain_province_mask * mountain_mass_mask * secondary_ridge_shape * MOUNTAIN_SHOULDER_HEIGHT * summit_detail_weight # Adds supported side ridges without thin protrusions or summit spikes.
     var mountain_height: float = (mountain_base + mountain_ridge + mountain_shoulders) * elevation_mountain_scale # Combines every mountain layer at the regional scale.
     var mountain_terrace_value: float = _sample_normalized(_mountain_terrace_noise, sample_x, sample_z) # Reads the alpine shelf-control field.
     var mountain_terrace_step: float = MOUNTAIN_TERRACE_MINIMUM_STEP + mountain_terrace_value * MOUNTAIN_TERRACE_STEP_RANGE # Varies giant shelf spacing across ranges.
@@ -127,6 +138,14 @@ func sample_height(world_x: float, world_z: float) -> float: # Returns the deter
     var procedural_height: float = lerpf(spawn_height, full_height, spawn_blend) # Blends the readable start into the complete tiered world.
     var flat_blend: float = smoothstep(SPAWN_FLAT_RADIUS, SPAWN_FLAT_BLEND_RADIUS, spawn_distance) # Keeps the inner spawn circle exactly level.
     return lerpf(SPAWN_FLAT_HEIGHT, procedural_height, flat_blend) # Returns the final deterministic world height.
+
+func _sample_broad_ridge_support(sample_x: float, sample_z: float, centre_ridge: float) -> float: # Measures ridge elevation around the current point so narrow protrusions cannot receive full height.
+    var east_ridge: float = _sample_normalized(_mountain_ridge_noise, sample_x + MOUNTAIN_WIDTH_SAMPLE_DISTANCE, sample_z) # Samples ridge support to the east.
+    var west_ridge: float = _sample_normalized(_mountain_ridge_noise, sample_x - MOUNTAIN_WIDTH_SAMPLE_DISTANCE, sample_z) # Samples ridge support to the west.
+    var north_ridge: float = _sample_normalized(_mountain_ridge_noise, sample_x, sample_z - MOUNTAIN_WIDTH_SAMPLE_DISTANCE) # Samples ridge support to the north.
+    var south_ridge: float = _sample_normalized(_mountain_ridge_noise, sample_x, sample_z + MOUNTAIN_WIDTH_SAMPLE_DISTANCE) # Samples ridge support to the south.
+    var surrounding_average: float = (east_ridge + west_ridge + north_ridge + south_ridge) * 0.25 # Measures the broad ridge body independently of one centre-line maximum.
+    return centre_ridge * 0.20 + surrounding_average * 0.80 # Lets surrounding width dominate while retaining a restrained contribution from the centre.
 
 func _get_tier_height(macro_elevation: float) -> float: # Converts a normalized macro value into continuous broad elevation shelves.
     var highest_tier_index: float = float(TIER_LEVEL_COUNT - 1) # Converts the number of shelf levels into the highest valid zero-based index.
