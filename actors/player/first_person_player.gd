@@ -1,15 +1,15 @@
 extends CharacterBody3D # Provides collision-aware walking, water swimming, and optional collision-free developer flight.
 class_name FirstPersonPlayer # Makes the player type available to typed gameplay and developer-console code.
 
-const WALK_SPEED: float = 5.0 # Defines the player's normal movement speed.
-const SPRINT_SPEED: float = 8.0 # Defines the player's sprint movement speed.
-const GROUND_ACCELERATION: float = 28.0 # Controls how quickly grounded movement reaches its target speed.
-const AIR_ACCELERATION: float = 8.0 # Controls limited directional adjustment while airborne.
+const WALK_SPEED: float = 7.5 # Defines the player's faster normal movement speed across the monumental terrain.
+const SPRINT_SPEED: float = 12.0 # Defines the player's faster sprint movement speed.
+const GROUND_ACCELERATION: float = 38.0 # Keeps faster grounded movement responsive when starting, stopping, or changing direction.
+const AIR_ACCELERATION: float = 11.0 # Preserves proportionate directional adjustment while airborne at the higher travel speed.
 const JUMP_VELOCITY: float = 7.0 # Defines the upward velocity applied when jumping.
-const SWIM_SPEED: float = 4.5 # Defines ordinary horizontal movement speed while the body is immersed.
-const SWIM_SPRINT_SPEED: float = 7.5 # Defines faster swimming while the sprint input is held.
-const SWIM_VERTICAL_SPEED: float = 4.2 # Defines explicit ascent and descent speed while swimming.
-const SWIM_ACCELERATION: float = 11.0 # Controls water drag and responsiveness toward the requested swim velocity.
+const SWIM_SPEED: float = 6.5 # Defines faster ordinary horizontal movement while the body is immersed.
+const SWIM_SPRINT_SPEED: float = 10.5 # Defines faster swimming while the sprint input is held.
+const SWIM_VERTICAL_SPEED: float = 6.0 # Defines faster explicit ascent and descent while swimming.
+const SWIM_ACCELERATION: float = 16.0 # Keeps faster swimming responsive while retaining noticeable water resistance.
 const SWIM_BODY_SAMPLE_HEIGHT: float = 0.9 # Tests immersion at the capsule centre rather than at the player's feet.
 const SWIM_SURFACE_ROOT_DEPTH: float = 1.48 # Buoys the player toward a root height that leaves the camera close to the surface.
 const SWIM_BUOYANCY_RESPONSE: float = 0.65 # Converts displacement from the preferred floating depth into vertical swim input.
