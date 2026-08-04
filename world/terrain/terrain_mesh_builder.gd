@@ -55,7 +55,7 @@ func build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh: # Generates a se
             colours[vertex_index] = _get_terrain_colour(height, normal) # Stores terrain colouring based on elevation and exposed slope.
             uvs[vertex_index] = Vector2(world_x, world_z) * TerrainConfiguration.TERRAIN_UV_SCALE # Stores seamless world-space texture coordinates.
     var quad_count: int = (TerrainConfiguration.CHUNK_RESOLUTION - 1) * (TerrainConfiguration.CHUNK_RESOLUTION - 1) # Calculates the number of regular grid quads.
-    var indices: PackedInt32Array = PackedInt32Array() # Stores two upward-facing triangles for every grid quad.
+    var indices: PackedInt32Array = PackedInt32Array() # Stores two reversed-winding triangles for every grid quad.
     indices.resize(quad_count * 6) # Allocates the complete terrain index buffer once.
     var write_index: int = 0 # Tracks the next index-buffer position during grid triangulation.
     for quad_z: int in range(TerrainConfiguration.CHUNK_RESOLUTION - 1): # Triangulates each row of terrain quads.
@@ -64,12 +64,12 @@ func build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh: # Generates a se
             var top_right: int = top_left + 1 # Locates the quad's back-right vertex.
             var bottom_left: int = top_left + TerrainConfiguration.CHUNK_RESOLUTION # Locates the quad's forward-left vertex.
             var bottom_right: int = bottom_left + 1 # Locates the quad's forward-right vertex.
-            indices[write_index] = top_left # Starts the first upward-facing triangle at the back-left corner.
-            indices[write_index + 1] = bottom_left # Continues the first triangle at the forward-left corner.
-            indices[write_index + 2] = top_right # Finishes the first triangle at the back-right corner.
-            indices[write_index + 3] = top_right # Starts the second triangle at the back-right corner.
-            indices[write_index + 4] = bottom_left # Continues the second triangle at the forward-left corner.
-            indices[write_index + 5] = bottom_right # Finishes the second triangle at the forward-right corner.
+            indices[write_index] = top_left # Starts the first reversed-winding triangle at the back-left corner.
+            indices[write_index + 1] = top_right # Continues the first triangle at the back-right corner.
+            indices[write_index + 2] = bottom_left # Finishes the first triangle at the forward-left corner.
+            indices[write_index + 3] = top_right # Starts the second reversed-winding triangle at the back-right corner.
+            indices[write_index + 4] = bottom_right # Continues the second triangle at the forward-right corner.
+            indices[write_index + 5] = bottom_left # Finishes the second triangle at the forward-left corner.
             write_index += 6 # Advances to the next quad's six index entries.
     var arrays: Array = [] # Creates the fixed mesh-array container expected by ArrayMesh.
     arrays.resize(Mesh.ARRAY_MAX) # Allocates every possible mesh channel slot.
