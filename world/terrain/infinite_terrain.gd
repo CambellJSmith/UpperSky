@@ -43,6 +43,12 @@ func _process(_delta: float) -> void: # Advances bounded terrain streaming work 
 func get_height_at(world_position: Vector2) -> float: # Exposes the authoritative height field to spawning and future world systems.
     return _height_sampler.sample_height(world_position.x, world_position.y) # Samples the same function used by every generated mesh vertex.
 
+func local_to_world_position(local_position: Vector3) -> Vector3: # Converts a near-origin scene position into a stable absolute procedural-world position.
+    return Vector3(local_position.x + _world_origin_offset.x, local_position.y, local_position.z + _world_origin_offset.y) # Adds the accumulated horizontal world offset without changing elevation.
+
+func world_to_local_position(world_position: Vector3) -> Vector3: # Converts a stable absolute procedural-world position into the current near-origin scene space.
+    return Vector3(world_position.x - _world_origin_offset.x, world_position.y, world_position.z - _world_origin_offset.y) # Removes the accumulated horizontal world offset without changing elevation.
+
 func get_loaded_chunk_count() -> int: # Reports the current loaded chunk count for profiling and future diagnostics.
     return _chunks.size() # Returns the number of visual chunk nodes currently retained.
 
