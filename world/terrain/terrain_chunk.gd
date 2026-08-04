@@ -14,8 +14,7 @@ func configure(source_mesh: ArrayMesh) -> void: # Assigns generated geometry and
     add_child(_mesh_instance) # Adds the visual node beneath the streamable chunk.
     _collision_shape = CollisionShape3D.new() # Creates one reusable collision node for near-player activation.
     _collision_shape.name = "TerrainCollision" # Gives the runtime collision node a stable descriptive name.
-    _collision_shape.disabled = true # Keeps collision disabled until the terrain controller explicitly enables it.
-    add_child(_collision_shape) # Adds the collision node beneath the static body.
+    add_child(_collision_shape) # Adds the collision node beneath the static body without an active shape.
 
 func set_collision_active(enabled: bool) -> void: # Creates or releases collision according to the player's distance from this chunk.
     if enabled == _collision_active: # Avoids rebuilding collision when the requested state has not changed.
@@ -23,7 +22,5 @@ func set_collision_active(enabled: bool) -> void: # Creates or releases collisio
     _collision_active = enabled # Stores the newly requested collision state.
     if _collision_active: # Checks whether collision must now be installed.
         _collision_shape.shape = _source_mesh.create_trimesh_shape() # Creates exact concave terrain collision from the generated triangles.
-        _collision_shape.disabled = false # Enables the newly assigned collision shape.
-        return # Stops after activating collision.
-    _collision_shape.disabled = true # Disables collision before releasing its shape resource.
-    _collision_shape.shape = null # Releases the expensive concave collision data for distant chunks.
+        return # Stops after activating collision through its assigned shape.
+    _collision_shape.shape = null # Releases the expensive concave collision data and removes its physical effect.
