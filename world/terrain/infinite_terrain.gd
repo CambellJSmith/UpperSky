@@ -1,6 +1,8 @@
 extends Node3D # Streams deterministic procedural terrain and tiered water chunks around a tracked player.
 class_name InfiniteTerrain # Makes the terrain controller available to the game composition root.
 
+const WATER_PRESENCE_EPSILON: float = 0.02 # Matches shoreline clipping tolerance when deciding whether a real water volume exists.
+
 var _height_sampler: TerrainHeightSampler # Supplies one continuous deterministic height function for every terrain chunk.
 var _mesh_builder: TerrainMeshBuilder # Converts height samples into seam-consistent renderable ground meshes.
 var _terrain_material: StandardMaterial3D # Shades generated ground vertices using their authored terrain colours.
@@ -49,8 +51,13 @@ func _process(_delta: float) -> void: # Advances bounded terrain and water strea
 func get_height_at(world_position: Vector2) -> float: # Exposes the authoritative ground height field to spawning and future world systems.
     return _height_sampler.sample_height(world_position.x, world_position.y) # Samples the same function used by every generated terrain mesh vertex.
 
-func get_water_level_at(world_position: Vector2) -> float: # Exposes the local flat water band to future swimming, audio, weather, and placement systems.
+func get_water_level_at(world_position: Vector2) -> float: # Exposes the local flat water band to swimming, audio, weather, and placement systems.
     return _water_level_sampler.sample_water_level(world_position.x, world_position.y) # Samples the same deterministic level used by generated water geometry.
+
+func has_water_at(world_position: Vector2) -> bool: # Reports whether the clipped water mesh occupies one absolute horizontal position.
+    var terrain_height: float = get_height_at(world_position) # Samples the exact ground surface used to clip water geometry.
+    var water_level: float = get_water_level_at(world_position) # Samples the exact local flat level used to generate water.
+    return terrain_height < water_level - WATER_PRESENCE_EPSILON # Matches mesh clipping so dry high ground never behaves as water.
 
 func local_to_world_position(local_position: Vector3) -> Vector3: # Converts a near-origin scene position into a stable absolute procedural-world position.
     return Vector3(local_position.x + _world_origin_offset.x, local_position.y, local_position.z + _world_origin_offset.y) # Adds the accumulated horizontal world offset without changing elevation.
