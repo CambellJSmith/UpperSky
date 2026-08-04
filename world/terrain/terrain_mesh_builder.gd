@@ -1,11 +1,13 @@
 extends RefCounted # Converts deterministic height samples into renderable seamless terrain meshes.
 class_name TerrainMeshBuilder # Makes terrain mesh construction available to the streaming controller.
 
-const LOWLAND_COLOR: Color = Color(0.19, 0.29, 0.13, 1.0) # Represents deep fertile valleys and sheltered low ground.
-const GRASS_COLOR: Color = Color(0.28, 0.39, 0.17, 1.0) # Represents ordinary rolling grassland.
-const HIGHLAND_COLOR: Color = Color(0.37, 0.34, 0.21, 1.0) # Represents dry elevated slopes and mountain foothills.
-const ROCK_COLOR: Color = Color(0.34, 0.35, 0.37, 1.0) # Represents exposed steep rock faces.
-const SNOW_COLOR: Color = Color(0.82, 0.84, 0.86, 1.0) # Represents high cold mountain shelves and summits.
+const DEEP_VALLEY_COLOR: Color = Color(0.12, 0.20, 0.10, 1.0) # Represents the deepest sheltered valley floors and basin bottoms.
+const LOWLAND_COLOR: Color = Color(0.19, 0.29, 0.13, 1.0) # Represents fertile low shelves and broad valley corridors.
+const GRASS_COLOR: Color = Color(0.28, 0.39, 0.17, 1.0) # Represents ordinary midland shelves and rolling uplands.
+const HIGHLAND_COLOR: Color = Color(0.37, 0.34, 0.21, 1.0) # Represents dry upper plateaus and mountain approaches.
+const ALPINE_COLOR: Color = Color(0.38, 0.39, 0.36, 1.0) # Represents exposed high shelves below permanent snow.
+const ROCK_COLOR: Color = Color(0.29, 0.30, 0.32, 1.0) # Represents steep cliffs and immense mountain walls.
+const SNOW_COLOR: Color = Color(0.82, 0.84, 0.86, 1.0) # Represents the highest cold mountain shelves and rounded summits.
 
 var _height_sampler: TerrainHeightSampler # Supplies one continuous deterministic height function for every chunk.
 var _terrain_material: StandardMaterial3D # Shades generated vertices using their authored terrain colours.
@@ -52,7 +54,7 @@ func build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh: # Generates a se
             var world_z: float = chunk_world_z + local_z # Reconstructs world z for continuous texture coordinates.
             vertices[vertex_index] = Vector3(local_x, height, local_z) # Stores the final local terrain position.
             normals[vertex_index] = normal # Stores the centred height-field normal.
-            colours[vertex_index] = _get_terrain_colour(height, normal) # Stores terrain colouring based on elevation and exposed slope.
+            colours[vertex_index] = _get_terrain_colour(height, normal) # Stores terrain colouring based on monumental elevation and exposed slope.
             uvs[vertex_index] = Vector2(world_x, world_z) * TerrainConfiguration.TERRAIN_UV_SCALE # Stores seamless world-space texture coordinates.
     var quad_count: int = (TerrainConfiguration.CHUNK_RESOLUTION - 1) * (TerrainConfiguration.CHUNK_RESOLUTION - 1) # Calculates the number of regular grid quads.
     var indices: PackedInt32Array = PackedInt32Array() # Stores two reversed-winding triangles for every grid quad.
@@ -83,17 +85,23 @@ func build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh: # Generates a se
     terrain_mesh.surface_set_material(0, _terrain_material) # Shares one terrain material across every chunk surface.
     return terrain_mesh # Returns the completed seamless chunk mesh.
 
-func _get_terrain_colour(height: float, normal: Vector3) -> Color: # Selects and blends a terrain colour from elevation and slope.
-    var elevation_colour: Color = LOWLAND_COLOR # Starts low terrain with sheltered valley colouring.
-    if height >= 12.0 and height < 72.0: # Detects ordinary hills and low uplands.
-        var grass_blend: float = smoothstep(12.0, 72.0, height) # Calculates gradual lowland-to-grass transition weight.
-        elevation_colour = LOWLAND_COLOR.lerp(GRASS_COLOR, grass_blend) # Blends fertile valleys into ordinary grassland.
-    elif height >= 72.0 and height < 145.0: # Detects exposed foothills and highlands.
-        var highland_blend: float = smoothstep(72.0, 145.0, height) # Calculates gradual grass-to-highland transition weight.
-        elevation_colour = GRASS_COLOR.lerp(HIGHLAND_COLOR, highland_blend) # Blends grassland into drier high terrain.
-    elif height >= 145.0: # Detects upper mountain elevations.
-        var snow_blend: float = smoothstep(165.0, 225.0, height) * smoothstep(0.42, 0.82, normal.y) # Favours snow on high surfaces that are not near-vertical.
-        elevation_colour = ROCK_COLOR.lerp(SNOW_COLOR, snow_blend) # Blends high exposed rock into summit snow.
+func _get_terrain_colour(height: float, normal: Vector3) -> Color: # Selects and blends a terrain colour across the new kilometre-scale elevation range.
+    var elevation_colour: Color = DEEP_VALLEY_COLOR # Starts the deepest world regions with sheltered dark vegetation.
+    if height < 80.0: # Detects deep valleys, basins, and lowland floors.
+        var lowland_blend: float = smoothstep(-260.0, 80.0, height) # Calculates the deep-valley-to-lowland transition.
+        elevation_colour = DEEP_VALLEY_COLOR.lerp(LOWLAND_COLOR, lowland_blend) # Blends basin bottoms into fertile lowlands.
+    elif height < 520.0: # Detects lower and middle elevation shelves.
+        var grass_blend: float = smoothstep(80.0, 520.0, height) # Calculates the lowland-to-grass transition.
+        elevation_colour = LOWLAND_COLOR.lerp(GRASS_COLOR, grass_blend) # Blends fertile corridors into broad grass shelves.
+    elif height < 1250.0: # Detects upper regional tiers and mountain foothills.
+        var highland_blend: float = smoothstep(520.0, 1250.0, height) # Calculates the grass-to-highland transition.
+        elevation_colour = GRASS_COLOR.lerp(HIGHLAND_COLOR, highland_blend) # Blends green shelves into dry high plateaus.
+    elif height < 2300.0: # Detects alpine shelves and the lower faces of immense ranges.
+        var alpine_blend: float = smoothstep(1250.0, 2300.0, height) # Calculates the highland-to-alpine transition.
+        elevation_colour = HIGHLAND_COLOR.lerp(ALPINE_COLOR, alpine_blend) # Blends high plateaus into exposed alpine terrain.
+    else: # Detects the upper faces and summits of the largest mountain systems.
+        var snow_blend: float = smoothstep(2850.0, 4700.0, height) * smoothstep(0.34, 0.80, normal.y) # Favours snow on extremely high surfaces that are not near-vertical.
+        elevation_colour = ROCK_COLOR.lerp(SNOW_COLOR, snow_blend) # Blends immense exposed rock into summit snow.
     var steepness: float = 1.0 - clampf(normal.y, 0.0, 1.0) # Converts the surface normal into a slope exposure value.
-    var rock_blend: float = smoothstep(0.26, 0.62, steepness) # Identifies steep faces where soil and grass should give way to rock.
-    return elevation_colour.lerp(ROCK_COLOR, rock_blend) # Returns the final slope-aware terrain colour.
+    var rock_blend: float = smoothstep(0.20, 0.58, steepness) # Identifies dramatic walls and cliffs where vegetation should give way to rock.
+    return elevation_colour.lerp(ROCK_COLOR, rock_blend) # Returns the final slope-aware monumental terrain colour.
