@@ -1,11 +1,6 @@
 extends RefCounted # Selects deterministic local water elevations that follow the world's major terrain tiers.
 class_name TerrainWaterLevelSampler # Makes tier-aware water levels available to mesh generation and future gameplay systems.
 
-const WATER_LEVEL_OFFSET: float = -120.0 # Places each water surface below its surrounding regional shelf so only valleys and basins flood.
-const WATER_LEVEL_CLEARANCE: float = 96.0 # Requires the general regional surface to sit safely above the next higher water band before switching levels.
-const REGIONAL_PLATEAU_INFLUENCE: float = 0.24 # Lets broad local uplands influence water-band selection without making individual lakes slope.
-const REGIONAL_BASIN_INFLUENCE: float = 0.22 # Lets enormous basins select an appropriate lower water band without following every terrain depression.
-
 var _warp_x_noise: FastNoiseLite # Reproduces the terrain generator's continental x-axis distortion.
 var _warp_z_noise: FastNoiseLite # Reproduces the terrain generator's independent continental z-axis distortion.
 var _continent_noise: FastNoiseLite # Reproduces the broad continental elevation tendency.
@@ -38,10 +33,10 @@ func sample_water_level(world_x: float, world_z: float) -> float: # Returns one 
     var basin_value: float = _sample_normalized(_basin_noise, sample_x, sample_z) # Reads the regional basin field.
     var basin_mask: float = smoothstep(0.62, 0.88, 1.0 - basin_value) # Selects the deepest broad basin regions.
     var basin_cut: float = basin_mask * TerrainHeightSampler.BASIN_DEPTH # Reconstructs the basin's broad elevation reduction.
-    var regional_height: float = tier_height + plateau_relief * REGIONAL_PLATEAU_INFLUENCE - basin_cut * REGIONAL_BASIN_INFLUENCE # Estimates the general local land height without following mountains or individual valleys.
-    var water_coordinate: float = (regional_height - WATER_LEVEL_CLEARANCE - WATER_LEVEL_OFFSET) / TerrainHeightSampler.TIER_HEIGHT # Finds the highest water band that remains safely beneath the surrounding region.
+    var regional_height: float = tier_height + plateau_relief * TerrainConfiguration.WATER_REGIONAL_PLATEAU_INFLUENCE - basin_cut * TerrainConfiguration.WATER_REGIONAL_BASIN_INFLUENCE # Estimates the general local land height without following mountains or individual valleys.
+    var water_coordinate: float = (regional_height - TerrainConfiguration.WATER_LEVEL_CLEARANCE - TerrainConfiguration.WATER_LEVEL_OFFSET) / TerrainHeightSampler.TIER_HEIGHT # Finds the highest water band that remains safely beneath the surrounding region.
     var water_tier_index: int = clampi(floori(water_coordinate), 0, TerrainHeightSampler.TIER_LEVEL_COUNT - 1) # Restricts water to the six established world elevation tiers.
-    return float(water_tier_index) * TerrainHeightSampler.TIER_HEIGHT + WATER_LEVEL_OFFSET # Returns one of six flat deterministic water elevations.
+    return float(water_tier_index) * TerrainHeightSampler.TIER_HEIGHT + TerrainConfiguration.WATER_LEVEL_OFFSET # Returns one of six flat deterministic water elevations.
 
 func _get_tier_height(macro_elevation: float) -> float: # Reconstructs the terrain's continuous broad elevation shelves.
     var highest_tier_index: float = float(TerrainHeightSampler.TIER_LEVEL_COUNT - 1) # Converts the available shelf count into the highest valid index.
