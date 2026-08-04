@@ -11,8 +11,11 @@ const MINIMUM_RESOURCE_MAXIMUM: float = 0.001 # Prevents invalid zero-range prog
 var _vitals: PlayerVitals # Supplies authoritative current and maximum resource values owned by the player.
 var _displayed_revision: int = -1 # Caches the last rendered vitals revision for bounded polling without signals.
 
-func _ready() -> void: # Applies the intended interface draw order after the reusable scene enters the tree.
+func _ready() -> void: # Applies draw order and resolves the player-owned resource model from the authored game scene.
     layer = HUD_LAYER # Keeps the status bars visible above world-space and underwater rendering.
+    var vitals_node: Node = get_node_or_null("../DynamicEntities/Player/PlayerVitals") # Finds the authoritative vitals node mounted inside the active player scene.
+    if vitals_node is PlayerVitals: # Verifies the authored dependency has the expected strong type.
+        initialize(vitals_node as PlayerVitals) # Connects the status bars to the same stamina maximum used by inventory capacity.
 
 func initialize(vitals: PlayerVitals) -> void: # Connects the HUD to the player-owned resource model.
     _vitals = vitals # Stores the authoritative source shared with inventory weight capacity.
