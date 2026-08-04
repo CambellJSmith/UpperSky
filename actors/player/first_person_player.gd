@@ -11,6 +11,7 @@ const CONTROLLER_LOOK_SPEED: float = 2.6 # Converts right-stick input into camer
 const MINIMUM_PITCH: float = deg_to_rad(-89.0) # Prevents the camera from rotating beyond straight down.
 const MAXIMUM_PITCH: float = deg_to_rad(89.0) # Prevents the camera from rotating beyond straight up.
 
+@onready var _collision_shape: CollisionShape3D = $CollisionShape3D # Stores the capsule node used for movement and spawn placement queries.
 @onready var _head: Node3D = $Head # Stores the pivot used for vertical camera rotation.
 
 var _gravity: float = 0.0 # Stores the project gravity used by player movement.
@@ -19,6 +20,12 @@ var _pitch: float = 0.0 # Tracks the current vertical viewing angle.
 func _ready() -> void: # Initializes the player when it enters the active scene tree.
     _gravity = float(ProjectSettings.get_setting("physics/3d/default_gravity")) # Reads gravity once instead of querying project settings every physics frame.
     Input.mouse_mode = Input.MOUSE_MODE_CAPTURED # Captures the mouse for immediate first-person camera control.
+
+func get_collision_shape() -> Shape3D: # Exposes the player capsule resource for collision-safe external placement queries.
+    return _collision_shape.shape # Returns the same shape used by CharacterBody3D movement collision.
+
+func get_collision_local_transform() -> Transform3D: # Exposes the capsule offset relative to the player root for accurate shape queries.
+    return _collision_shape.transform # Returns the authored collision-node transform without leaking mutable node ownership.
 
 func _unhandled_input(event: InputEvent) -> void: # Handles camera input after interface controls have had an opportunity to consume it.
     if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED: # Limits mouse-look processing to captured mouse motion.
