@@ -17,11 +17,15 @@ var _is_open: bool = false # Tracks whether the inventory currently owns interfa
 var _displayed_inventory_revision: int = -1 # Caches the last rendered content revision for bounded polling.
 var _displayed_maximum_weight: float = -1.0 # Caches the last rendered stamina-derived capacity.
 
-func _ready() -> void: # Configures the authored inventory interface when it enters the scene tree.
+func _ready() -> void: # Configures the authored inventory interface and resolves player-owned dependencies from the game scene.
     layer = INVENTORY_LAYER # Applies the intended draw order relative to status HUD and console.
     process_mode = Node.PROCESS_MODE_ALWAYS # Keeps close input available if future gameplay pause states are introduced.
     _configure_item_tree() # Defines column titles and stable column sizing for the held-item list.
     visible = false # Starts hidden until the player requests the inventory.
+    var player_node: Node = get_node_or_null("../DynamicEntities/Player") # Finds the active first-person player mounted by the game scene.
+    var inventory_node: Node = get_node_or_null("../DynamicEntities/Player/PlayerInventory") # Finds the player-owned held-item model.
+    if player_node is FirstPersonPlayer and inventory_node is PlayerInventory: # Verifies both authored dependencies have their expected strong types.
+        initialize(player_node as FirstPersonPlayer, inventory_node as PlayerInventory) # Connects input ownership, item rows, and stamina-derived capacity.
 
 func initialize(player: FirstPersonPlayer, inventory: PlayerInventory) -> void: # Connects the interface to the active player and inventory model.
     _player = player # Stores the movement owner that will be temporarily locked.
