@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://application/game/game.gd" id="1_game"]
 [ext_resource type="PackedScene" path="res://world/environments/basic_world.tscn" id="2_world"]
@@ -7,6 +7,7 @@
 [ext_resource type="Script" path="res://application/effects/underwater_view.gd" id="5_underwater"]
 [ext_resource type="PackedScene" path="res://application/ui/player_status_hud.tscn" id="6_status_hud"]
 [ext_resource type="PackedScene" path="res://application/ui/player_inventory_ui.tscn" id="7_inventory_ui"]
+[ext_resource type="Script" path="res://application/game/starting_inventory.gd" id="8_starting_inventory"]
 
 [node name="Game" type="Node3D"]
 script = ExtResource("1_game")
@@ -16,6 +17,9 @@ script = ExtResource("1_game")
 [node name="DynamicEntities" type="Node3D" parent="."]
 
 [node name="Player" parent="DynamicEntities" instance=ExtResource("3_player")]
+
+[node name="StartingInventory" type="Node" parent="."]
+script = ExtResource("8_starting_inventory")
 
 [node name="UnderwaterView" type="CanvasLayer" parent="."]
 script = ExtResource("5_underwater")
