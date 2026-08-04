@@ -3,6 +3,7 @@ class_name TerrainConfiguration # Makes shared terrain dimensions available to g
 
 const CHUNK_SIZE: float = 256.0 # Covers large geographic sections so mountain provinces and valleys read at monumental scale.
 const CHUNK_RESOLUTION: int = 33 # Creates an eight-metre vertex grid that preserves the deliberately coarse terrain silhouette.
+const WATER_RESOLUTION: int = 17 # Creates a sixteen-metre water grid before exact triangle clipping to limit extra procedural sampling cost.
 const VISUAL_RADIUS: int = 9 # Keeps almost five kilometres of terrain loaded across the player's surrounding view.
 const COLLISION_RADIUS: int = 2 # Keeps exact terrain collision only in nearby chunks where gameplay can reach it.
 const INITIAL_COLLISION_RADIUS: int = 1 # Builds a complete three-by-three collision neighbourhood before resolving the player spawn.
