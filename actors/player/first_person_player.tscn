@@ -1,6 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://actors/player/first_person_player.gd" id="1_player_script"]
+[ext_resource type="Script" path="res://actors/player/player_vitals.gd" id="2_player_vitals"]
+[ext_resource type="Script" path="res://actors/player/player_inventory.gd" id="3_player_inventory"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
 radius = 0.4
@@ -11,6 +13,12 @@ script = ExtResource("1_player_script")
 floor_stop_on_slope = true
 floor_max_angle = 0.785398
 safe_margin = 0.001
+
+[node name="PlayerVitals" type="Node" parent="."]
+script = ExtResource("2_player_vitals")
+
+[node name="PlayerInventory" type="Node" parent="."]
+script = ExtResource("3_player_inventory")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 position = Vector3(0, 0.9, 0)
