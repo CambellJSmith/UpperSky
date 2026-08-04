@@ -7,12 +7,15 @@ const TERRAIN_COLLISION_MASK: int = 1 # Restricts spawn placement queries to the
 const SPAWN_QUERY_ATTEMPTS: int = 3 # Allows physics synchronization more than one frame before using the height-sample fallback.
 const PLAYER_SPAWN_FALLBACK_CLEARANCE: float = 16.0 # Keeps the emergency sampled-height fallback far above all nearby terrain variation.
 
-@onready var _terrain: InfiniteTerrain = $World/Terrain # Stores the active infinite terrain controller.
+@onready var _terrain: InfiniteTerrain = $World/Terrain # Stores the active infinite terrain and water controller.
 @onready var _dynamic_entities: Node3D = $DynamicEntities # Owns active entities that participate in floating-origin rebasing.
 @onready var _player: FirstPersonPlayer = $DynamicEntities/Player # Stores the active first-person player instance.
+@onready var _underwater_view: UnderwaterView = $UnderwaterView # Stores the camera-dependent underwater post-process controller.
 @onready var _developer_console: DeveloperConsole = $DeveloperConsole # Stores the reusable tilde console that controls developer commands.
 
-func _ready() -> void: # Connects developer controls and defers terrain-backed player initialization.
+func _ready() -> void: # Connects environment and developer controls before deferring terrain-backed player initialization.
+    _player.initialize_environment(_terrain) # Supplies authoritative terrain and water sampling directly to player movement.
+    _underwater_view.initialize(_player, _terrain) # Supplies the active camera and water system to the underwater view effect.
     _developer_console.initialize(_player) # Supplies the active player directly without global state or signals.
     _initialize_game.call_deferred() # Starts the collision-synchronized spawn sequence outside the scene-tree ready callback.
 
