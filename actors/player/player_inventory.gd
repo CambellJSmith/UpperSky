@@ -7,6 +7,11 @@ var _vitals: PlayerVitals # Supplies the current maximum stamina copied directly
 var _stacks: Array[InventoryStack] = [] # Stores held item stacks in stable insertion order for display and future save data.
 var _revision: int = 0 # Increments whenever held contents change so the open interface can refresh without signals.
 
+func _ready() -> void: # Resolves the player-owned vitals sibling authored beside this inventory node.
+    var vitals_node: Node = get_node_or_null("../PlayerVitals") # Finds the authoritative resource model inside the same player scene.
+    if vitals_node is PlayerVitals: # Verifies the scene dependency has the expected strong type.
+        initialize(vitals_node as PlayerVitals) # Connects carrying capacity to current maximum stamina immediately.
+
 func initialize(vitals: PlayerVitals) -> void: # Connects the inventory to the authoritative player resource model.
     _vitals = vitals # Stores the source whose current maximum stamina defines carrying capacity.
 
