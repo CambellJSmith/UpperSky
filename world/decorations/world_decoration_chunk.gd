@@ -107,7 +107,7 @@ func _create_collisions() -> void: # Creates dense nearby collision with shared 
         return # Avoids duplicate shape owners and invalid setup.
     for placement: WorldDecorationPlacement in _placements: # Visits every generated nearby object.
         var visual_scale: Vector3 = placement.transform.basis.get_scale() # Extracts positive instance dimensions from the visual transform.
-        var owner_id: int = create_shape_owner(self) # Creates one lightweight transform owner directly on this StaticBody3D.
+        var owner_id: int = create_shape_owner(placement) # Creates one lightweight transform owner tied to the retained deterministic placement.
         var shape_transform: Transform3D = Transform3D.IDENTITY # Starts with an unrotated chunk-local primitive transform.
         if placement.kind == WorldDecorationPlacement.Kind.TREE: # Creates a narrow solid trunk while leaving foliage non-solid.
             var trunk_shape: CylinderShape3D = _mesh_library.get_tree_collision_shape(visual_scale) # Reuses one of three shared trunk resources.
