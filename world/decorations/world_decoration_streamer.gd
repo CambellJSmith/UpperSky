@@ -7,6 +7,7 @@ const NEAR_LOD_RADIUS: int = 1 # Uses full decoration geometry only in chunks im
 const MEDIUM_LOD_RADIUS: int = 3 # Uses the middle detail tier before switching the outer visible rings to minimal silhouettes.
 const INITIAL_BUILD_RADIUS: int = 0 # Builds only the current decoration chunk synchronously to reduce startup stalls.
 const CHUNKS_BUILT_PER_FRAME: int = 1 # Limits dense placement and MultiMesh creation to one missing chunk per rendered frame.
+const LOD_UPDATES_PER_FRAME: int = 4 # Spreads retained-chunk LOD buffer rebuilds across frames after crossing a chunk boundary.
 const STREAM_STATE_REFRESH_INTERVAL: float = 0.15 # Avoids checking chunk, LOD, and floating-origin state every rendered frame.
 const SPAWN_EXCLUSION_RADIUS: float = 32.0 # Keeps the immediate shoreline start clear of trunks, rocks, and spawn-cast interference.
 const INVALID_CHUNK_COORDINATE: Vector2i = Vector2i(2_147_483_647, 2_147_483_647) # Forces the first streaming refresh after initialization.
@@ -20,6 +21,8 @@ var _chunks: Dictionary[Vector2i, WorldDecorationChunk] = {} # Stores every load
 var _desired_chunks: Dictionary[Vector2i, bool] = {} # Stores the current visible decoration set.
 var _pending_chunks: Array[Vector2i] = [] # Holds missing chunks in near-to-far generation order.
 var _pending_chunk_index: int = 0 # Tracks the next queued coordinate without repeatedly shifting the array.
+var _pending_lod_updates: Array[Vector2i] = [] # Holds retained chunks that crossed a visual detail boundary.
+var _pending_lod_index: int = 0 # Tracks the next LOD update without shifting the queue.
 var _last_origin_local_position: Vector2 = Vector2(INF, INF) # Detects floating-origin changes so loaded decoration chunks remain aligned.
 var _state_refresh_elapsed: float = 0.0 # Accumulates time between inexpensive stream-state checks.
 var _initialized: bool = false # Tracks whether the terrain-backed initial decoration neighbourhood has been created.
@@ -43,7 +46,7 @@ func initialize(terrain: InfiniteTerrain, player: Node3D, spawn_world_position: 
     _current_chunk_coordinate = _get_chunk_coordinate(_get_player_world_position()) # Calculates the initial absolute decoration chunk coordinate.
     _refresh_streaming_set(_current_chunk_coordinate) # Builds desired and queued chunk coordinates around the player.
     _build_initial_area(_current_chunk_coordinate) # Creates only the current visible and collidable chunk synchronously.
-    _update_chunk_detail_states() # Applies the correct LOD and reduced collision radius to the initial chunk.
+    _refresh_collision_states() # Applies the reduced collision radius to the initial chunk.
     _update_chunk_local_positions() # Aligns all generated chunks with the terrain's current floating origin.
     _initialized = true # Marks the streamer ready for ordinary bounded updates.
 
@@ -62,6 +65,7 @@ func _process(delta: float) -> void: # Advances bounded dense streaming while ch
             _current_chunk_coordinate = player_chunk_coordinate # Stores the new streaming centre.
             _refresh_streaming_set(_current_chunk_coordinate) # Rebuilds desired, queued, unloaded, LOD, and collision states.
     _build_pending_chunks() # Generates at most one missing dense object chunk this frame.
+    _apply_pending_lod_updates() # Rebuilds only a few retained-chunk LOD buffers per frame to avoid boundary spikes.
 
 func _try_initialize_from_game_scene() -> void: # Detects completion of the existing deferred terrain and player spawn sequence.
     if _terrain == null or _player == null: # Waits for both scene dependencies to resolve.
@@ -90,7 +94,8 @@ func _refresh_streaming_set(centre: Vector2i) -> void: # Recalculates every deco
         var chunk: WorldDecorationChunk = _chunks[chunk_coordinate] # Retrieves the streamable chunk node.
         _chunks.erase(chunk_coordinate) # Removes the coordinate from active lookup immediately.
         chunk.queue_free() # Releases MultiMeshes, placements, collision owners, and the chunk node at frame end.
-    _update_chunk_detail_states() # Re-evaluates LOD and collision for every retained chunk around the new centre.
+    _refresh_collision_states() # Re-evaluates physical interaction immediately around the new centre.
+    _queue_lod_updates() # Defers retained-chunk visual LOD rebuilds across several rendered frames.
 
 func _append_ring_coordinates(centre: Vector2i, ring: int) -> void: # Adds one deterministic square ring of desired chunk coordinates.
     for offset_z: int in range(-ring, ring + 1): # Visits each row crossing the current square ring.
@@ -170,9 +175,30 @@ func _get_lod_level(chunk_distance: int) -> int: # Selects the shared decoration
         return WorldDecorationMeshLibrary.LOD_MEDIUM # Uses substantially reduced shared geometry.
     return WorldDecorationMeshLibrary.LOD_FAR # Uses minimal smooth silhouettes and disables their shadows.
 
-func _update_chunk_detail_states() -> void: # Applies distance LOD and reduced collision to every retained decoration chunk.
+func _refresh_collision_states() -> void: # Applies reduced collision immediately to every retained decoration chunk.
     for chunk_coordinate: Vector2i in _chunks.keys(): # Visits every currently loaded decoration chunk.
         var chunk: WorldDecorationChunk = _chunks[chunk_coordinate] # Retrieves the streamable object body.
-        var chunk_distance: int = _get_chunk_distance(chunk_coordinate) # Measures its current player-centred ring.
-        chunk.set_lod_level(_get_lod_level(chunk_distance)) # Rebuilds visual buffers only when the chunk crosses an LOD boundary.
-        chunk.set_collision_active(chunk_distance <= COLLISION_RADIUS) # Retains physical shapes only in the immediate three-by-three area.
+        chunk.set_collision_active(_get_chunk_distance(chunk_coordinate) <= COLLISION_RADIUS) # Retains physical shapes only in the immediate three-by-three area.
+
+func _queue_lod_updates() -> void: # Queues retained chunks for bounded visual detail changes after the streaming centre moves.
+    _pending_lod_updates.clear() # Discards stale LOD work from the previous centre.
+    _pending_lod_index = 0 # Restarts sequential queue reading.
+    for ring: int in range(VISUAL_RADIUS + 1): # Prioritizes nearby visual changes before distant rings.
+        for offset_z: int in range(-ring, ring + 1): # Visits each row crossing the current square ring.
+            for offset_x: int in range(-ring, ring + 1): # Visits each column crossing the current square ring.
+                if maxi(absi(offset_x), absi(offset_z)) != ring: # Skips coordinates inside the current perimeter.
+                    continue # Continues until reaching the active ring edge.
+                var chunk_coordinate: Vector2i = _current_chunk_coordinate + Vector2i(offset_x, offset_z) # Converts the ring offset into absolute chunk space.
+                if _chunks.has(chunk_coordinate): # Detects a retained chunk requiring a tier check.
+                    _pending_lod_updates.append(chunk_coordinate) # Queues near-to-far work without rebuilding unchanged tiers immediately.
+
+func _apply_pending_lod_updates() -> void: # Applies only a few retained-chunk LOD changes during the current rendered frame.
+    var updates_applied: int = 0 # Tracks work against the per-frame LOD rebuild budget.
+    while updates_applied < LOD_UPDATES_PER_FRAME and _pending_lod_index < _pending_lod_updates.size(): # Continues while budget and queued work remain.
+        var chunk_coordinate: Vector2i = _pending_lod_updates[_pending_lod_index] # Retrieves the next retained coordinate without shifting the queue.
+        _pending_lod_index += 1 # Advances sequentially to the next item.
+        if not _chunks.has(chunk_coordinate): # Detects a chunk unloaded after the queue was built.
+            continue # Skips stale work safely.
+        var chunk: WorldDecorationChunk = _chunks[chunk_coordinate] # Retrieves the retained object chunk.
+        chunk.set_lod_level(_get_lod_level(_get_chunk_distance(chunk_coordinate))) # Rebuilds buffers only if this chunk actually crossed an LOD tier.
+        updates_applied += 1 # Consumes one bounded update slot even when the chunk was already on the correct tier.
