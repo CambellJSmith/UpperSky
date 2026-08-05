@@ -1,7 +1,7 @@
 extends Node3D # Streams dense deterministic smooth trees and boulders independently from terrain mesh generation.
 class_name WorldDecorationStreamer # Makes the optimized decoration system available to the game composition root.
 
-const VISUAL_RADIUS: int = 6 # Retains more than three kilometres of decoration visibility while distance LOD controls geometry cost.
+const VISUAL_RADIUS: int = 5 # Keeps a broad 2.8-kilometre decoration field while reducing loaded decoration chunks from 169 to 121.
 const COLLISION_RADIUS: int = 1 # Keeps physical shapes in a three-by-three chunk area instead of the original five-by-five area.
 const NEAR_LOD_RADIUS: int = 1 # Uses full decoration geometry only in chunks immediately surrounding the player.
 const MEDIUM_LOD_RADIUS: int = 3 # Uses the middle detail tier before switching the outer visible rings to minimal silhouettes.
