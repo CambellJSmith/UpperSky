@@ -152,8 +152,7 @@ func _is_too_close(position: Vector2, occupied_cells: Dictionary, minimum_spacin
             if not occupied_cells.has(cell): # Detects an empty bucket.
                 continue # Skips allocation and iteration for empty space.
             var positions: Array = occupied_cells[cell] # Retrieves the small list of accepted positions in this bucket.
-            for stored_position_value: Variant in positions: # Visits every accepted object in the bucket.
-                var stored_position: Vector2 = stored_position_value # Converts the variant back into the stored horizontal position.
+            for stored_position: Vector2 in positions: # Visits every accepted object in the bucket.
                 if position.distance_squared_to(stored_position) < minimum_spacing_squared: # Detects an intersecting or overcrowded candidate.
                     return true # Rejects the candidate immediately.
     return false # Reports sufficient spacing from every nearby accepted object.
