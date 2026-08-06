@@ -1,6 +1,7 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://world/terrain/infinite_terrain.gd" id="1_terrain"]
+[ext_resource type="Script" path="res://world/environments/day_night_cycle.gd" id="2_cycle"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_world"]
 sky_top_color = Color(0.12, 0.29, 0.55, 1)
@@ -28,6 +29,7 @@ fog_height_density = 0.0018
 fog_sky_affect = 0.36
 
 [node name="BasicWorld" type="Node3D"]
+script = ExtResource("2_cycle")
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_world")
@@ -38,6 +40,13 @@ light_color = Color(1, 0.92, 0.8, 1)
 light_energy = 1.2
 shadow_enabled = true
 directional_shadow_max_distance = 1600.0
+
+[node name="Moon" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(128, 148, 0)
+light_color = Color(0.48, 0.58, 0.82, 1)
+light_energy = 0.0
+shadow_enabled = false
+directional_shadow_max_distance = 1200.0
 
 [node name="Terrain" type="Node3D" parent="."]
 script = ExtResource("1_terrain")
