@@ -23,10 +23,12 @@ tonemap_mode = 2
 fog_enabled = true
 fog_light_color = Color(0.62, 0.71, 0.8, 1)
 fog_light_energy = 0.58
-fog_density = 0.00032
-fog_height = 360.0
-fog_height_density = 0.0018
-fog_sky_affect = 0.36
+fog_density = 0.00052
+fog_aerial_perspective = 0.68
+fog_sun_scatter = 0.08
+fog_height = 320.0
+fog_height_density = 0.00065
+fog_sky_affect = 0.48
 
 [node name="BasicWorld" type="Node3D"]
 script = ExtResource("2_cycle")
