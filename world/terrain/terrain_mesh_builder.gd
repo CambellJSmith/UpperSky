@@ -37,6 +37,9 @@ func build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh: # Generates a se
     var cache_resolution: int = TerrainConfiguration.CHUNK_RESOLUTION + 2 # Adds a one-sample border around the chunk for seam-consistent normals.
     var height_cache: PackedFloat32Array = PackedFloat32Array() # Stores sampled heights for vertices and their external normal neighbours.
     height_cache.resize(cache_resolution * cache_resolution) # Allocates the complete bordered height grid once.
+    var water_cell_count: int = TerrainConfiguration.WATER_RESOLUTION - 1 # Matches the rendered water grid used for exact local water levels.
+    var water_cell_size: float = TerrainConfiguration.CHUNK_SIZE / float(water_cell_count) # Calculates the world size of one rendered water cell.
+    var water_level_cache: Dictionary[Vector2i, float] = {} # Reuses one water-band sample for every terrain vertex inside the same water cell.
     var chunk_world_x: float = float(chunk_coordinate.x) * TerrainConfiguration.CHUNK_SIZE # Calculates the chunk's authoritative world-space x origin.
     var chunk_world_z: float = float(chunk_coordinate.y) * TerrainConfiguration.CHUNK_SIZE # Calculates the chunk's authoritative world-space z origin.
     for cache_z: int in range(cache_resolution): # Samples each row of the bordered height cache.
@@ -68,7 +71,15 @@ func build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh: # Generates a se
             var local_z: float = float(vertex_z) * vertex_spacing # Calculates the vertex's local z position inside the chunk.
             var world_x: float = chunk_world_x + local_x # Reconstructs world x for deterministic water and texture sampling.
             var world_z: float = chunk_world_z + local_z # Reconstructs world z for deterministic water and texture sampling.
-            var water_level: float = _water_level_sampler.sample_water_level(world_x, world_z) # Reads the local flat water band used to identify shore and seabed terrain.
+            var water_cell_coordinate: Vector2i = Vector2i(floori(world_x / water_cell_size), floori(world_z / water_cell_size)) # Selects the exact global rendered water cell containing this vertex.
+            var water_level: float = 0.0 # Receives the deterministic flat level assigned to the selected water cell.
+            if water_level_cache.has(water_cell_coordinate): # Detects a level already sampled for another terrain vertex in the same cell.
+                water_level = water_level_cache[water_cell_coordinate] # Reuses the cached level without repeating procedural noise.
+            else: # Handles the first terrain vertex encountered inside one rendered water cell.
+                var water_sample_x: float = (float(water_cell_coordinate.x) + 0.5) * water_cell_size # Reconstructs the exact x centre sampled by water mesh generation.
+                var water_sample_z: float = (float(water_cell_coordinate.y) + 0.5) * water_cell_size # Reconstructs the exact z centre sampled by water mesh generation.
+                water_level = _water_level_sampler.sample_water_level(water_sample_x, water_sample_z) # Reads the same local flat water band used by the visible water polygon.
+                water_level_cache[water_cell_coordinate] = water_level # Caches the result for remaining vertices in this water cell.
             vertices[vertex_index] = Vector3(local_x, height, local_z) # Stores the final local terrain position.
             normals[vertex_index] = normal # Stores the centred height-field normal.
             colours[vertex_index] = _get_terrain_colour(height, normal, water_level) # Stores terrain colour plus the slope-aware shoreline sand mask.
