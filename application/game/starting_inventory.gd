@@ -1,20 +1,30 @@
-extends Node # Grants the active player the authored items they should hold at the beginning of a new game.
-class_name StartingInventory # Makes the starter-inventory composition node available for typed scene references and diagnostics.
+extends Node
+class_name StartingInventory
 
-const MYSTERIOUS_LOCKET_ID: StringName = &"mysterious_locket" # Defines the stable identifier used for stacking, removal, and future item-specific behaviour.
-const MYSTERIOUS_LOCKET_NAME: String = "Mysterious Locket" # Defines the exact player-facing item name shown in the inventory list.
-const MYSTERIOUS_LOCKET_WEIGHT: float = 0.10 # Gives the small metal locket a restrained carried weight in kilograms.
-const MYSTERIOUS_LOCKET_QUANTITY: int = 1 # Grants exactly one locket at the beginning of a new game.
+const MYSTERIOUS_LOCKET_ID: StringName = &"mysterious_locket"
+const MYSTERIOUS_LOCKET_NAME: String = "Mysterious Locket"
+const MYSTERIOUS_LOCKET_WEIGHT: float = 0.10
+const MYSTERIOUS_LOCKET_QUANTITY: int = 1
 
-@onready var _inventory: PlayerInventory = $"../DynamicEntities/Player/PlayerInventory" # Resolves the authoritative player-owned inventory from the game composition root.
+@onready var _inventory: PlayerInventory = $"../DynamicEntities/Player/PlayerInventory"
 
-func _ready() -> void: # Defers starter-item assignment until every player-owned inventory dependency has completed initialization.
-    _grant_starting_items.call_deferred() # Ensures maximum stamina is available before the capacity-aware inventory addition runs.
+func _ready() -> void:
+    _grant_starting_items.call_deferred()
 
-func _grant_starting_items() -> void: # Adds every authored starting item through the ordinary capacity-enforcing inventory API.
-    if _inventory == null: # Detects a malformed game composition without the expected player inventory node.
-        push_error("Unable to grant starting inventory: PlayerInventory was not found.") # Reports the missing scene dependency without silently discarding the starter item.
-        return # Stops before attempting an invalid inventory call.
-    var locket_added: bool = _inventory.try_add_item(MYSTERIOUS_LOCKET_ID, MYSTERIOUS_LOCKET_NAME, MYSTERIOUS_LOCKET_WEIGHT, MYSTERIOUS_LOCKET_QUANTITY) # Adds the locket exactly as any future pickup or reward would.
-    if not locket_added: # Detects invalid capacity or an unexpected conflicting item definition.
-        push_error("Unable to grant starting item: Mysterious Locket.") # Makes failed starter-state initialization visible during development.
+func _grant_starting_items() -> void:
+    if _inventory == null:
+        push_error("Unable to grant starting inventory: PlayerInventory was not found.")
+        return
+
+    if not _inventory.try_add_item(MYSTERIOUS_LOCKET_ID, MYSTERIOUS_LOCKET_NAME, MYSTERIOUS_LOCKET_WEIGHT, MYSTERIOUS_LOCKET_QUANTITY):
+        push_error("Unable to grant starting item: Mysterious Locket.")
+
+    _grant_equipment(EquipmentCatalog.IRON_SWORD)
+    _grant_equipment(EquipmentCatalog.IRON_PICKAXE)
+
+func _grant_equipment(definition: EquipmentDefinition) -> void:
+    if definition == null or not definition.is_valid():
+        push_error("Unable to grant invalid starting equipment definition.")
+        return
+    if not _inventory.try_add_item(definition.item_id, definition.display_name, definition.unit_weight, 1):
+        push_error("Unable to grant starting equipment: %s." % definition.display_name)

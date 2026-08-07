@@ -1,0 +1,31 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://items/equipment/melee_equipment.gd" id="1_melee"]
+
+[sub_resource type="BoxMesh" id="BladeMesh"]
+size = Vector3(0.07, 0.78, 0.035)
+
+[sub_resource type="BoxMesh" id="GuardMesh"]
+size = Vector3(0.34, 0.055, 0.07)
+
+[sub_resource type="CylinderMesh" id="GripMesh"]
+top_radius = 0.035
+bottom_radius = 0.042
+height = 0.32
+radial_segments = 8
+
+[node name="IronSword" type="Node3D"]
+script = ExtResource("1_melee")
+rotation_degrees = Vector3(-8, 0, -10)
+
+[node name="Blade" type="MeshInstance3D" parent="."]
+position = Vector3(0, 0.24, 0)
+mesh = SubResource("BladeMesh")
+
+[node name="Guard" type="MeshInstance3D" parent="."]
+position = Vector3(0, -0.18, 0)
+mesh = SubResource("GuardMesh")
+
+[node name="Grip" type="MeshInstance3D" parent="."]
+position = Vector3(0, -0.36, 0)
+mesh = SubResource("GripMesh")
