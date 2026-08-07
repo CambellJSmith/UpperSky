@@ -2,7 +2,7 @@ extends Node3D
 class_name GroundFloraStreamer
 
 const FLORA_SHADER: Shader = preload("res://world/vegetation/ground_flora.gdshader")
-const VISUAL_RADIUS := 3
+const VISUAL_RADIUS := 2
 const INITIAL_BUILD_RADIUS := 0
 const CHUNKS_BUILT_PER_FRAME := 1
 const REFRESH_INTERVAL := 0.18
@@ -15,7 +15,7 @@ enum Species { GRASS, SHRUB, FERN, REED, FLOWER }
 
 const SPECIES_NAMES := ["Grass", "Shrubs", "Ferns", "Reeds", "Wildflowers"]
 const CELL_SIZES := [7.25, 25.0, 16.0, 10.5, 14.5]
-const VISIBILITY_RANGES := [640.0, 1050.0, 720.0, 760.0, 560.0]
+const VISIBILITY_RANGES := [0.0, 720.0, 560.0, 560.0, 480.0]
 const SLOPE_LIMITS := [3.8, 5.4, 4.4, 3.0, 3.1]
 const ALTITUDE_FADE_STARTS := [1500.0, 1200.0, 1050.0, 1450.0, 1250.0]
 const ALTITUDE_FADE_ENDS := [2750.0, 2150.0, 1900.0, 2250.0, 2200.0]
@@ -136,6 +136,8 @@ func _build_chunk(coordinate: Vector2i) -> void:
     chunk.position = _get_chunk_local_position(coordinate)
     add_child(chunk)
     for species in range(SPECIES_NAMES.size()):
+        if species == Species.GRASS:
+            continue
         var transforms: Array[Transform3D] = []
         var colours: Array[Color] = []
         _sample_species(species, origin, transforms, colours)
@@ -179,7 +181,7 @@ func _sample_species(species: int, chunk_origin: Vector2, transforms: Array[Tran
 func _get_probability(species: int, fertility: float, moisture: float, patch: float, position: Vector2) -> float:
     match species:
         Species.GRASS:
-            return clampf(0.52 + fertility * 0.27 + moisture * 0.10 + patch * 0.12, 0.0, 0.97)
+            return 0.0
         Species.SHRUB:
             return 0.06 + smoothstep(0.30, 0.78, fertility) * lerpf(0.45, 1.0, patch) * 0.48
         Species.FERN:
