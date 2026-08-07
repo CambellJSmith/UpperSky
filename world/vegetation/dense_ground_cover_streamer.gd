@@ -10,12 +10,15 @@ const GRID_SIZE: int = 100
 const TILE_AXIS_COUNT: int = 4
 const TILE_GRID_SIZE: int = 25
 const TILE_SIZE: float = 80.0
-const HEIGHTMAP_RESOLUTION: int = 65
-const HEIGHTMAP_STEP: float = 5.0
+const TERRAIN_VERTEX_SPACING: float = 8.0
+const TERRAIN_MAP_BORDER_CELLS: int = 1
+const TERRAIN_MAP_BORDER: float = TERRAIN_VERTEX_SPACING * float(TERRAIN_MAP_BORDER_CELLS)
+const TERRAIN_MAP_RESOLUTION: int = 43
 const RECENTER_STEP: float = 32.0
 const REFRESH_INTERVAL: float = 0.12
 const PATCH_BLADE_COUNT: int = 28
 const PATCH_SPREAD_RADIUS: float = 2.35
+const ROOT_EMBED_DEPTH: float = 0.035
 const WATER_SHORE_START: float = 3.0
 const WATER_SHORE_FULL: float = 14.0
 const GRASS_ALTITUDE_FADE_START: float = 1750.0
@@ -33,6 +36,7 @@ var _terrain_texture: ImageTexture
 var _tiles: Array[MultiMeshInstance3D] = []
 var _carpet_world_centre: Vector2 = Vector2(INF, INF)
 var _carpet_world_origin: Vector2 = Vector2.ZERO
+var _terrain_map_world_origin: Vector2 = Vector2.ZERO
 var _last_local_world_origin: Vector2 = Vector2(INF, INF)
 var _refresh_elapsed: float = 0.0
 var _initialized: bool = false
@@ -65,13 +69,15 @@ func _try_initialize() -> void:
         return
     _water_sampler = TerrainWaterLevelSampler.new()
     _coverage_noise = _create_noise(1031, 0.0048, 2, 0.48)
-    _terrain_image = Image.create_empty(HEIGHTMAP_RESOLUTION, HEIGHTMAP_RESOLUTION, false, Image.FORMAT_RGF)
+    _terrain_image = Image.create_empty(TERRAIN_MAP_RESOLUTION, TERRAIN_MAP_RESOLUTION, false, Image.FORMAT_RGF)
     _terrain_texture = ImageTexture.create_from_image(_terrain_image)
     _material = ShaderMaterial.new()
     _material.shader = GRASS_SHADER
     _material.set_shader_parameter("terrain_map", _terrain_texture)
     _material.set_shader_parameter("carpet_size", CARPET_SIZE)
     _material.set_shader_parameter("patch_spacing", PATCH_SPACING)
+    _material.set_shader_parameter("terrain_vertex_spacing", TERRAIN_VERTEX_SPACING)
+    _material.set_shader_parameter("root_embed_depth", ROOT_EMBED_DEPTH)
     _create_tiles()
     _recenter_if_needed(true)
     _initialized = true
@@ -86,7 +92,9 @@ func _recenter_if_needed(force_refresh: bool = false) -> void:
         return
     _carpet_world_centre = snapped_centre
     _carpet_world_origin = _carpet_world_centre - Vector2(HALF_CARPET_SIZE, HALF_CARPET_SIZE)
+    _terrain_map_world_origin = _carpet_world_origin - Vector2(TERRAIN_MAP_BORDER, TERRAIN_MAP_BORDER)
     _material.set_shader_parameter("carpet_world_origin", _carpet_world_origin)
+    _material.set_shader_parameter("terrain_map_world_origin", _terrain_map_world_origin)
     _refresh_terrain_map()
     _reposition_tiles()
 
@@ -139,7 +147,7 @@ func _create_tiles() -> void:
             _tiles.append(tile)
 
 func _refresh_terrain_map() -> void:
-    var sample_count: int = HEIGHTMAP_RESOLUTION * HEIGHTMAP_RESOLUTION
+    var sample_count: int = TERRAIN_MAP_RESOLUTION * TERRAIN_MAP_RESOLUTION
     var heights: PackedFloat32Array = PackedFloat32Array()
     var water_levels: PackedFloat32Array = PackedFloat32Array()
     heights.resize(sample_count)
@@ -148,11 +156,11 @@ func _refresh_terrain_map() -> void:
     var minimum_height: float = INF
     var maximum_height: float = -INF
 
-    for sample_z: int in range(HEIGHTMAP_RESOLUTION):
-        var world_z: float = _carpet_world_origin.y + float(sample_z) * HEIGHTMAP_STEP
-        for sample_x: int in range(HEIGHTMAP_RESOLUTION):
-            var world_x: float = _carpet_world_origin.x + float(sample_x) * HEIGHTMAP_STEP
-            var index: int = sample_z * HEIGHTMAP_RESOLUTION + sample_x
+    for sample_z: int in range(TERRAIN_MAP_RESOLUTION):
+        var world_z: float = _terrain_map_world_origin.y + float(sample_z) * TERRAIN_VERTEX_SPACING
+        for sample_x: int in range(TERRAIN_MAP_RESOLUTION):
+            var world_x: float = _terrain_map_world_origin.x + float(sample_x) * TERRAIN_VERTEX_SPACING
+            var index: int = sample_z * TERRAIN_MAP_RESOLUTION + sample_x
             var position: Vector2 = Vector2(world_x, world_z)
             var height: float = _terrain.get_height_at(position)
             var water_level: float = _sample_water_level_cached(position, water_cache)
@@ -161,19 +169,19 @@ func _refresh_terrain_map() -> void:
             minimum_height = minf(minimum_height, height)
             maximum_height = maxf(maximum_height, height)
 
-    for sample_z: int in range(HEIGHTMAP_RESOLUTION):
+    for sample_z: int in range(TERRAIN_MAP_RESOLUTION):
         var previous_z: int = maxi(sample_z - 1, 0)
-        var next_z: int = mini(sample_z + 1, HEIGHTMAP_RESOLUTION - 1)
-        for sample_x: int in range(HEIGHTMAP_RESOLUTION):
+        var next_z: int = mini(sample_z + 1, TERRAIN_MAP_RESOLUTION - 1)
+        for sample_x: int in range(TERRAIN_MAP_RESOLUTION):
             var previous_x: int = maxi(sample_x - 1, 0)
-            var next_x: int = mini(sample_x + 1, HEIGHTMAP_RESOLUTION - 1)
-            var index: int = sample_z * HEIGHTMAP_RESOLUTION + sample_x
-            var left_height: float = heights[sample_z * HEIGHTMAP_RESOLUTION + previous_x]
-            var right_height: float = heights[sample_z * HEIGHTMAP_RESOLUTION + next_x]
-            var back_height: float = heights[previous_z * HEIGHTMAP_RESOLUTION + sample_x]
-            var forward_height: float = heights[next_z * HEIGHTMAP_RESOLUTION + sample_x]
-            var x_distance: float = maxf(float(next_x - previous_x) * HEIGHTMAP_STEP, HEIGHTMAP_STEP)
-            var z_distance: float = maxf(float(next_z - previous_z) * HEIGHTMAP_STEP, HEIGHTMAP_STEP)
+            var next_x: int = mini(sample_x + 1, TERRAIN_MAP_RESOLUTION - 1)
+            var index: int = sample_z * TERRAIN_MAP_RESOLUTION + sample_x
+            var left_height: float = heights[sample_z * TERRAIN_MAP_RESOLUTION + previous_x]
+            var right_height: float = heights[sample_z * TERRAIN_MAP_RESOLUTION + next_x]
+            var back_height: float = heights[previous_z * TERRAIN_MAP_RESOLUTION + sample_x]
+            var forward_height: float = heights[next_z * TERRAIN_MAP_RESOLUTION + sample_x]
+            var x_distance: float = maxf(float(next_x - previous_x) * TERRAIN_VERTEX_SPACING, TERRAIN_VERTEX_SPACING)
+            var z_distance: float = maxf(float(next_z - previous_z) * TERRAIN_VERTEX_SPACING, TERRAIN_VERTEX_SPACING)
             var x_grade: float = absf(right_height - left_height) / x_distance
             var z_grade: float = absf(forward_height - back_height) / z_distance
             var terrain_grade: float = maxf(x_grade, z_grade)
@@ -184,8 +192,8 @@ func _refresh_terrain_map() -> void:
             var shore_weight: float = smoothstep(WATER_SHORE_START, WATER_SHORE_FULL, water_clearance)
             var altitude_weight: float = 1.0 - smoothstep(GRASS_ALTITUDE_FADE_START, GRASS_ALTITUDE_FADE_END, height)
             var world_position: Vector2 = Vector2(
-                _carpet_world_origin.x + float(sample_x) * HEIGHTMAP_STEP,
-                _carpet_world_origin.y + float(sample_z) * HEIGHTMAP_STEP
+                _terrain_map_world_origin.x + float(sample_x) * TERRAIN_VERTEX_SPACING,
+                _terrain_map_world_origin.y + float(sample_z) * TERRAIN_VERTEX_SPACING
             )
             var regional_density: float = lerpf(0.90, 1.0, _sample_noise(_coverage_noise, world_position))
             var coverage: float = clampf(shore_weight * slope_weight * altitude_weight * regional_density, 0.0, 1.0)
@@ -219,6 +227,7 @@ func _create_patch_mesh() -> ArrayMesh:
     var vertices: PackedVector3Array = PackedVector3Array()
     var normals: PackedVector3Array = PackedVector3Array()
     var uvs: PackedVector2Array = PackedVector2Array()
+    var blade_roots: PackedVector2Array = PackedVector2Array()
     var indices: PackedInt32Array = PackedInt32Array()
     const GOLDEN_ANGLE: float = 2.39996323
 
@@ -242,6 +251,7 @@ func _create_patch_mesh() -> ArrayMesh:
         ]))
         for _unused: int in range(5):
             normals.append(forward)
+            blade_roots.append(Vector2(base.x, base.z))
         uvs.append_array(PackedVector2Array([
             Vector2(0.0, 0.0),
             Vector2(1.0, 0.0),
@@ -266,6 +276,7 @@ func _create_patch_mesh() -> ArrayMesh:
     arrays[Mesh.ARRAY_VERTEX] = vertices
     arrays[Mesh.ARRAY_NORMAL] = normals
     arrays[Mesh.ARRAY_TEX_UV] = uvs
+    arrays[Mesh.ARRAY_TEX_UV2] = blade_roots
     arrays[Mesh.ARRAY_INDEX] = indices
     var mesh: ArrayMesh = ArrayMesh.new()
     mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
