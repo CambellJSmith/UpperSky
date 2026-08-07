@@ -1,0 +1,21 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://items/equipment/melee_equipment.gd" id="1_melee"]
+
+[sub_resource type="BoxMesh" id="HandleMesh"]
+size = Vector3(0.065, 0.88, 0.065)
+
+[sub_resource type="BoxMesh" id="HeadMesh"]
+size = Vector3(0.58, 0.085, 0.085)
+
+[node name="IronPickaxe" type="Node3D"]
+script = ExtResource("1_melee")
+rotation_degrees = Vector3(-12, 0, -8)
+
+[node name="Handle" type="MeshInstance3D" parent="."]
+position = Vector3(0, -0.08, 0)
+mesh = SubResource("HandleMesh")
+
+[node name="Head" type="MeshInstance3D" parent="."]
+position = Vector3(0, 0.37, 0)
+mesh = SubResource("HeadMesh")
