@@ -12,11 +12,10 @@ const TILE_GRID_SIZE: int = 25
 const TILE_SIZE: float = 80.0
 const HEIGHTMAP_RESOLUTION: int = 65
 const HEIGHTMAP_STEP: float = 5.0
-const RECENTER_STEP: float = 20.0
+const RECENTER_STEP: float = 32.0
 const REFRESH_INTERVAL: float = 0.12
 const PATCH_BLADE_COUNT: int = 28
 const PATCH_SPREAD_RADIUS: float = 2.35
-const HASH_MAXIMUM: float = 2147483647.0
 const WATER_SHORE_START: float = 3.0
 const WATER_SHORE_FULL: float = 14.0
 const GRASS_ALTITUDE_FADE_START: float = 1750.0
@@ -71,6 +70,8 @@ func _try_initialize() -> void:
     _material = ShaderMaterial.new()
     _material.shader = GRASS_SHADER
     _material.set_shader_parameter("terrain_map", _terrain_texture)
+    _material.set_shader_parameter("carpet_size", CARPET_SIZE)
+    _material.set_shader_parameter("patch_spacing", PATCH_SPACING)
     _create_tiles()
     _recenter_if_needed(true)
     _initialized = true
@@ -85,6 +86,7 @@ func _recenter_if_needed(force_refresh: bool = false) -> void:
         return
     _carpet_world_centre = snapped_centre
     _carpet_world_origin = _carpet_world_centre - Vector2(HALF_CARPET_SIZE, HALF_CARPET_SIZE)
+    _material.set_shader_parameter("carpet_world_origin", _carpet_world_origin)
     _refresh_terrain_map()
     _reposition_tiles()
 
@@ -121,16 +123,11 @@ func _create_tiles() -> void:
                 for local_x: int in range(TILE_GRID_SIZE):
                     var global_x: int = tile_x * TILE_GRID_SIZE + local_x
                     var global_z: int = tile_z * TILE_GRID_SIZE + local_z
-                    var yaw: float = _hash01(global_x, global_z, 1117) * TAU
-                    var width_scale: float = lerpf(0.92, 1.08, _hash01(global_x, global_z, 1123))
-                    var basis: Basis = Basis(Vector3.UP, yaw).scaled(Vector3(width_scale, 1.0, width_scale))
                     var origin: Vector3 = Vector3((float(local_x) + 0.5) * PATCH_SPACING, 0.0, (float(local_z) + 0.5) * PATCH_SPACING)
-                    multimesh.set_instance_transform(instance_index, Transform3D(basis, origin))
+                    multimesh.set_instance_transform(instance_index, Transform3D(Basis.IDENTITY, origin))
                     var sample_u: float = (float(global_x) + 0.5) / float(GRID_SIZE)
                     var sample_v: float = (float(global_z) + 0.5) / float(GRID_SIZE)
-                    var density_threshold: float = lerpf(0.02, 0.98, _hash01(global_x, global_z, 1151))
-                    var colour_variation: float = _hash01(global_x, global_z, 1181)
-                    multimesh.set_instance_custom_data(instance_index, Color(sample_u, sample_v, density_threshold, colour_variation))
+                    multimesh.set_instance_custom_data(instance_index, Color(sample_u, sample_v, 0.0, 0.0))
                     instance_index += 1
             multimesh.custom_aabb = AABB(Vector3(-3.0, -600.0, -3.0), Vector3(TILE_SIZE + 6.0, 6400.0, TILE_SIZE + 6.0))
             var tile: MultiMeshInstance3D = MultiMeshInstance3D.new()
@@ -190,7 +187,7 @@ func _refresh_terrain_map() -> void:
                 _carpet_world_origin.x + float(sample_x) * HEIGHTMAP_STEP,
                 _carpet_world_origin.y + float(sample_z) * HEIGHTMAP_STEP
             )
-            var regional_density: float = lerpf(0.88, 1.0, _sample_noise(_coverage_noise, world_position))
+            var regional_density: float = lerpf(0.90, 1.0, _sample_noise(_coverage_noise, world_position))
             var coverage: float = clampf(shore_weight * slope_weight * altitude_weight * regional_density, 0.0, 1.0)
             _terrain_image.set_pixel(sample_x, sample_z, Color(height, coverage, 0.0, 1.0))
 
@@ -288,10 +285,3 @@ func _create_noise(seed_offset: int, frequency: float, octaves: int, gain: float
     noise.fractal_gain = gain
     noise.fractal_lacunarity = 2.0
     return noise
-
-func _hash01(x: int, z: int, salt: int) -> float:
-    var value: int = x * 374761393 + z * 668265263 + salt * 982451653 + TerrainHeightSampler.WORLD_SEED * 31
-    value = (value ^ (value >> 13)) & 0x7fffffff
-    value = (value * 1274126177) & 0x7fffffff
-    value = value ^ (value >> 16)
-    return float(value & 0x7fffffff) / HASH_MAXIMUM
