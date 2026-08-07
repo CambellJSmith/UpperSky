@@ -11,7 +11,8 @@ func _perform_primary_use() -> bool:
     var ray_direction: Vector3 = -_camera.global_transform.basis.z.normalized()
     var ray_end: Vector3 = ray_origin + ray_direction * _definition.reach
     var query := PhysicsRayQueryParameters3D.create(ray_origin, ray_end)
-    query.exclude = [_player.get_rid()]
+    var excluded_bodies: Array[RID] = [_player.get_rid()]
+    query.exclude = excluded_bodies
     query.collide_with_bodies = true
     query.collide_with_areas = true
 
@@ -25,12 +26,9 @@ func _perform_primary_use() -> bool:
     if receiver == null:
         return true
 
-    var hit := EquipmentHit.create(
-        _player,
-        _definition,
-        result.get("position", ray_end),
-        result.get("normal", Vector3.UP)
-    )
+    var hit_position: Vector3 = result.get("position", ray_end)
+    var hit_normal: Vector3 = result.get("normal", Vector3.UP)
+    var hit := EquipmentHit.create(_player, _definition, hit_position, hit_normal)
     receiver.call("receive_equipment_hit", hit)
     return true
 
