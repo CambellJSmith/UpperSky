@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="EquipmentDefinition" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://items/equipment/equipment_definition.gd" id="1_definition"]
+[ext_resource type="PackedScene" path="res://items/equipment/scenes/iron_sword.tscn" id="2_scene"]
+
+[resource]
+script = ExtResource("1_definition")
+item_id = &"iron_sword"
+display_name = "Iron Sword"
+category = 0
+unit_weight = 3.0
+held_scene = ExtResource("2_scene")
+reach = 2.45
+primary_cooldown = 0.55
+damage = 28.0
+tool_power = 0.0
+tool_tags = PackedStringArray("melee", "blade")
