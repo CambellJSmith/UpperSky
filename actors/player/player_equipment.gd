@@ -39,7 +39,7 @@ func equip_item(item_id: StringName) -> bool:
         return true
 
     var instance: Node = definition.held_scene.instantiate()
-    if not instance is EquippedItem:
+    if not (instance is EquippedItem):
         push_error("Equipment scene for %s must inherit EquippedItem." % definition.display_name)
         instance.queue_free()
         return false
@@ -147,7 +147,8 @@ func _cycle_equipment(direction: int) -> void:
         unequip()
         return
     if _equipped_definition == null:
-        equip_item(owned_items[0 if direction >= 0 else owned_items.size() - 1])
+        var initial_index: int = 0 if direction >= 0 else owned_items.size() - 1
+        equip_item(owned_items[initial_index])
         return
     var current_index: int = owned_items.find(_equipped_definition.item_id)
     if current_index < 0:
