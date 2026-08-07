@@ -30,12 +30,11 @@ func _ready() -> void:
     var player_node: Node = get_node_or_null("../DynamicEntities/Player")
     var inventory_node: Node = get_node_or_null("../DynamicEntities/Player/PlayerInventory")
     var equipment_node: Node = get_node_or_null("../DynamicEntities/Player/PlayerEquipment")
+    var resolved_equipment: PlayerEquipment = null
+    if equipment_node is PlayerEquipment:
+        resolved_equipment = equipment_node as PlayerEquipment
     if player_node is FirstPersonPlayer and inventory_node is PlayerInventory:
-        initialize(
-            player_node as FirstPersonPlayer,
-            inventory_node as PlayerInventory,
-            equipment_node as PlayerEquipment if equipment_node is PlayerEquipment else null
-        )
+        initialize(player_node as FirstPersonPlayer, inventory_node as PlayerInventory, resolved_equipment)
 
 func initialize(player: FirstPersonPlayer, inventory: PlayerInventory, equipment: PlayerEquipment = null) -> void:
     _player = player
