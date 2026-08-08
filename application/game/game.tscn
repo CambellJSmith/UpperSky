@@ -13,7 +13,7 @@
 [ext_resource type="Script" path="res://world/vegetation/dense_ground_cover_streamer.gd" id="11_dense_cover"]
 [ext_resource type="PackedScene" path="res://actors/enemies/straw_dummy/straw_dummy_enemy.tscn" id="12_training_dummy"]
 [ext_resource type="Script" path="res://application/game/training_dummy_placement.gd" id="13_training_dummy_placement"]
-[ext_resource type="Script" path="res://world/dungeons/cliff_dungeon_system.gd" id="14_dungeon_system"]
+[ext_resource type="Script" path="res://world/dungeons/precise_cliff_dungeon_system.gd" id="14_dungeon_system"]
 
 [node name="Game" type="Node3D"]
 script = ExtResource("1_game")
