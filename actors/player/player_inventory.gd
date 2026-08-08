@@ -32,8 +32,18 @@ func get_total_item_count() -> int: # Counts every individual held item across a
         total_count += stack.get_quantity() # Adds the quantity represented by the current stack.
     return total_count # Returns the complete number of held item units.
 
+func get_total_item_count_for_category(category: int) -> int: # Counts every held item unit assigned to one inventory category.
+    if not InventoryCategory.is_valid(category): # Rejects malformed category queries without treating them as another tab.
+        return 0 # Reports no matching items for invalid categories.
+    var total_count: int = 0 # Starts the category accumulation with no matching items.
+    for stack: InventoryStack in _stacks: # Visits every held stack once.
+        if stack.get_category() != category: # Detects a stack owned by a different inventory tab.
+            continue # Skips quantities outside the requested category.
+        total_count += stack.get_quantity() # Adds the complete quantity represented by the matching stack.
+    return total_count # Returns the number of individual held items visible under this category.
+
 func get_stack_count() -> int: # Reports how many distinct item stacks are currently held.
-    return _stacks.size() # Returns the number of visible inventory rows.
+    return _stacks.size() # Returns the number of stored inventory rows across every category.
 
 func get_stack_at(index: int) -> InventoryStack: # Returns one held stack for read-only interface presentation.
     if index < 0 or index >= _stacks.size(): # Rejects invalid row indices defensively.
@@ -49,10 +59,10 @@ func can_add_item(unit_weight: float, quantity: int = 1) -> bool: # Reports whet
     var added_weight: float = unit_weight * float(quantity) # Calculates the mass contributed by the requested addition.
     return get_total_weight() + added_weight <= get_maximum_weight() + WEIGHT_EPSILON # Allows the addition only when total carried weight remains within capacity.
 
-func try_add_item(item_id: StringName, display_name: String, unit_weight: float, quantity: int = 1) -> bool: # Adds an item stack only when its full weight fits inside current capacity.
+func try_add_item(item_id: StringName, display_name: String, unit_weight: float, quantity: int = 1, category: int = InventoryCategory.Type.MISC) -> bool: # Adds an item stack to one category only when its full weight fits inside current capacity.
     var item_id_text: String = String(item_id) # Converts the stable identifier for validation and fallback display text.
-    if item_id_text.is_empty() or unit_weight < 0.0 or quantity <= 0: # Rejects missing identifiers, negative weight, or non-positive quantities.
-        return false # Leaves inventory contents unchanged for invalid additions.
+    if item_id_text.is_empty() or unit_weight < 0.0 or quantity <= 0 or not InventoryCategory.is_valid(category): # Rejects missing identifiers, invalid weight or quantity, and unsupported category values.
+        return false # Leaves inventory contents unchanged for malformed additions.
     if not can_add_item(unit_weight, quantity): # Checks the live maximum stamina before changing any stack.
         return false # Enforces the current carrying limit atomically.
     var resolved_display_name: String = display_name.strip_edges() # Removes accidental whitespace from the user-facing item name.
@@ -62,9 +72,11 @@ func try_add_item(item_id: StringName, display_name: String, unit_weight: float,
     if existing_stack != null: # Detects an item that should combine with an existing row.
         if not is_equal_approx(existing_stack.get_unit_weight(), unit_weight): # Detects conflicting weight definitions for one identifier.
             return false # Prevents an existing stack from silently changing its physical weight.
+        if existing_stack.get_category() != category: # Detects conflicting inventory classifications for one stable item identifier.
+            return false # Prevents one logical item stack from appearing under multiple tabs.
         existing_stack.increase_quantity(quantity) # Adds the approved quantity to the matching stack.
     else: # Handles the first held instance of this item definition.
-        _stacks.append(InventoryStack.new(item_id, resolved_display_name, unit_weight, quantity)) # Creates a new visible stack in insertion order.
+        _stacks.append(InventoryStack.new(item_id, resolved_display_name, unit_weight, quantity, category)) # Creates a new visible stack with its immutable category in insertion order.
     _revision += 1 # Marks inventory contents as changed for the open interface.
     return true # Reports that the complete requested quantity was accepted.
 
@@ -79,14 +91,14 @@ func remove_item(item_id: StringName, quantity: int = 1) -> int: # Removes up to
     if removed_quantity <= 0: # Handles a defensive empty-stack result.
         return 0 # Leaves the revision unchanged when no content changed.
     if stack.get_quantity() == 0: # Detects a stack emptied by the removal.
-        _stacks.remove_at(stack_index) # Removes empty rows from storage and the visible list.
+        _stacks.remove_at(stack_index) # Removes empty rows from storage and every tab view.
     _revision += 1 # Marks inventory contents as changed for interface refresh.
     return removed_quantity # Reports the quantity actually removed.
 
 func clear() -> void: # Removes every currently held item stack.
     if _stacks.is_empty(): # Detects an already empty inventory.
         return # Avoids a false revision change.
-    _stacks.clear() # Discards every held stack.
+    _stacks.clear() # Discards every held stack across every category.
     _revision += 1 # Marks inventory contents as changed.
 
 func _find_stack(item_id: StringName) -> InventoryStack: # Finds one held stack by stable item identifier.
