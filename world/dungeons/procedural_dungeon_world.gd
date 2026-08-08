@@ -11,13 +11,15 @@ const LIGHT_ENERGY: float = 1.55 # Defines a readable but restrained intensity f
 var _layout: DungeonLayout # Stores the deterministic logical floor plan used by all generated physical systems.
 var _dungeon_seed: int = 0 # Stores the stable root seed used to reconstruct this exact interior on every visit.
 var _pair_id: int = -1 # Stores the exterior pair identity currently represented by this active world space.
+var _region_coordinate: Vector2i = Vector2i.ZERO # Stores the infinite overworld region that owns the active pair for readable interior labels.
 var _environment: Environment # Stores the runtime camera environment used while the overworld is suspended.
 var _door_a: DungeonDoor # Stores the generated interior exit linked back to exterior endpoint A.
 var _door_b: DungeonDoor # Stores the generated interior exit linked back to exterior endpoint B.
 
-func build(pair_id: int, dungeon_seed: int) -> void: # Generates the complete deterministic dungeon world from immutable pair identity and seed.
-    _pair_id = pair_id # Retains the pair identity for generated labels and diagnostics.
+func build(pair_id: int, dungeon_seed: int, region_coordinate: Vector2i) -> void: # Generates the complete deterministic dungeon world from immutable pair identity, seed, and owning region.
+    _pair_id = pair_id # Retains the pair identity for transition routing and generated diagnostics.
     _dungeon_seed = dungeon_seed # Retains the seed shared by topology, visual variation, and lighting placement.
+    _region_coordinate = region_coordinate # Retains the source overworld region so interior endpoints use compact stable labels instead of large numeric IDs.
     var layout_generator: DungeonLayoutGenerator = DungeonLayoutGenerator.new() # Creates the isolated logical topology service without scene-tree ownership.
     _layout = layout_generator.generate(_dungeon_seed) # Reconstructs the complete guaranteed-connected A-to-B floor plan from the stable seed.
     _build_geometry() # Converts validated logical cells into combined procedural visual and collision meshes.
@@ -63,15 +65,16 @@ func _build_geometry() -> void: # Creates runtime-only dungeon rendering and sim
     add_child(dungeon_body) # Adds the complete collision shell beneath this disposable dungeon world root.
 
 func _build_interior_doors() -> void: # Creates exactly two procedural interior exits mapped to the pair's exterior A and B endpoints.
+    var label_prefix: String = "DUNGEON [%d,%d]" % [_region_coordinate.x, _region_coordinate.y] # Builds one compact stable label shared by both inside exits of this streamed infinite-region pair.
     _door_a = DungeonDoor.new() # Allocates endpoint A directly from the reusable runtime-generated door implementation.
     _door_a.name = "InteriorDoorA" # Gives the generated exit a stable diagnostic scene-tree identity.
     _door_a.position = _get_interior_door_position(DungeonPairDefinition.Endpoint.A) # Places endpoint A against the western boundary wall of its logical cell.
-    _door_a.configure(_pair_id, DungeonPairDefinition.Endpoint.A, false, -PI * 0.5, "DUNGEON %dA" % [_pair_id + 1]) # Maps the west interior exit directly back to exterior door A.
+    _door_a.configure(_pair_id, DungeonPairDefinition.Endpoint.A, false, -PI * 0.5, "%s A" % label_prefix) # Maps the west interior exit directly back to exterior door A with the owning region displayed.
     add_child(_door_a) # Adds endpoint A to the active dungeon physics and interaction world.
     _door_b = DungeonDoor.new() # Allocates endpoint B from the exact same procedural door implementation.
     _door_b.name = "InteriorDoorB" # Gives the second generated exit a stable diagnostic identity.
     _door_b.position = _get_interior_door_position(DungeonPairDefinition.Endpoint.B) # Places endpoint B against the eastern boundary wall of its logical cell.
-    _door_b.configure(_pair_id, DungeonPairDefinition.Endpoint.B, false, PI * 0.5, "DUNGEON %dB" % [_pair_id + 1]) # Maps the east interior exit directly back to exterior door B.
+    _door_b.configure(_pair_id, DungeonPairDefinition.Endpoint.B, false, PI * 0.5, "%s B" % label_prefix) # Maps the east interior exit directly back to exterior door B with matching region identity.
     add_child(_door_b) # Adds endpoint B to the active dungeon interaction world.
 
 func _get_interior_door_position(endpoint: DungeonPairDefinition.Endpoint) -> Vector3: # Resolves one interior endpoint from logical grid coordinates to its matching boundary-wall position.
