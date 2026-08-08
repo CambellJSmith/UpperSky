@@ -3,7 +3,7 @@ class_name ProceduralDungeonWorld # Exposes generated geometry, lighting, exits,
 
 const PLAYER_FLOOR_CLEARANCE: float = 0.08 # Matches the small player spawn separation used by the overworld terrain placement flow.
 const INTERIOR_SPAWN_DISTANCE: float = 1.55 # Places the player safely inside the dungeon after arriving through either paired endpoint.
-const GENERATED_LIGHT_COUNT: int = 12 # Caps procedural local lights for predictable compatibility-renderer cost.
+const GENERATED_LIGHT_COUNT: int = 7 # Stays below Compatibility's default eight-omni-lights-per-mesh limit for the single combined dungeon architecture mesh.
 const LIGHT_HEIGHT: float = 2.85 # Places generated dungeon lights above eye level while keeping them below the ceiling.
 const LIGHT_RANGE: float = 11.5 # Gives each generated source enough reach to create alternating illuminated and dark areas.
 const LIGHT_ENERGY: float = 1.55 # Defines a readable but restrained intensity for the generated warm dungeon lighting.
