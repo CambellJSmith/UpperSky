@@ -1,9 +1,8 @@
-extends ProceduralDungeonWorld # Retains deterministic dungeon generation while improving grounded collision reliability and interior visibility.
-class_name ReadableProceduralDungeonWorld # Provides primitive floor contact, simplified wall collision, brighter ambient fill, and stronger existing lanterns.
+extends ProceduralDungeonWorld # Retains deterministic dungeon topology while replacing flat interior planes with paired floor and ceiling height maps.
+class_name ReadableProceduralDungeonWorld # Provides height-field architecture, height-map floor collision, exact sloped-surface spawning, and brighter readable lighting.
 
-const FLOOR_COLLISION_THICKNESS: float = 0.30 # Gives the broad primitive dungeon floor enough thickness for reliable CharacterBody contact without changing the visible floor plane.
-const CEILING_COLLISION_THICKNESS: float = 0.30 # Gives the broad primitive ceiling a simple reliable blocker while keeping its lower face aligned with visible ceiling height.
 const WORLD_COLLISION_LAYER: int = 1 # Matches the ordinary solid-world collision layer already used by the player, terrain, and generated dungeon architecture.
+const HEIGHTMAP_COLLISION_SCALE: float = DungeonHeightFieldMeshBuilder.CELL_SIZE # Uniformly scales HeightMapShape3D's one-unit grid spacing to the dungeon's physical logical-cell spacing.
 const LANTERN_ENERGY_MULTIPLIER: float = 1.65 # Raises each existing procedural lantern enough to illuminate nearby walls and floor clearly.
 const LANTERN_RANGE_MULTIPLIER: float = 1.35 # Broadens each existing light pool so dark gaps between the bounded compatibility-renderer light count are less severe.
 const READABLE_AMBIENT_COLOUR: Color = Color(0.25, 0.275, 0.32, 1.0) # Provides a cool neutral fill that preserves the warmer identity of local lanterns.
@@ -13,39 +12,69 @@ const READABLE_FOG_COLOUR: Color = Color(0.13, 0.14, 0.155, 1.0) # Lightens atmo
 const READABLE_FOG_ENERGY: float = 0.72 # Raises fog illumination enough to preserve depth cues under the stronger ambient baseline.
 const READABLE_FOG_DENSITY: float = 0.006 # Reduces the original fog density so long corridors retain more visible geometry.
 
-func _build_geometry() -> void: # Builds the unchanged procedural visuals but replaces horizontal trimesh contact with broad primitive floor and ceiling collision.
-    var geometry_builder: DungeonGeometryBuilder = DungeonGeometryBuilder.new() # Creates the established visual mesh service using the exact same deterministic layout and stone generation path.
-    var visual_mesh: ArrayMesh = geometry_builder.build_visual_mesh(_layout, _dungeon_seed) # Generates the complete visible floor, ceiling, walls, and deterministic trim without changing dungeon appearance.
-    var mesh_instance: MeshInstance3D = MeshInstance3D.new() # Creates one render node for the complete combined procedural architecture mesh.
-    mesh_instance.name = "GeneratedArchitecture" # Preserves the established diagnostic scene-tree name used for runtime inspection.
-    mesh_instance.mesh = visual_mesh # Installs the unchanged deterministic visible mesh resource.
-    add_child(mesh_instance) # Adds the complete visible dungeon architecture beneath this disposable world root.
-    var collision_body: StaticBody3D = StaticBody3D.new() # Creates one static physics owner for all reliable simplified dungeon collision shapes.
-    collision_body.name = "GeneratedCollision" # Preserves the existing collision owner name for remote-scene debugging.
-    collision_body.collision_layer = WORLD_COLLISION_LAYER # Places the complete simplified shell on the player's normal world-collision layer.
-    collision_body.collision_mask = WORLD_COLLISION_LAYER # Retains ordinary static-world collision behavior for future dungeon actors using the same layer.
-    add_child(collision_body) # Installs the physics owner before attaching direct CollisionShape3D children as required by Godot.
-    var dungeon_width: float = float(_layout.width) * DungeonGeometryBuilder.CELL_SIZE # Calculates the complete centred grid width covered by the generated dungeon layout.
-    var dungeon_depth: float = float(_layout.height) * DungeonGeometryBuilder.CELL_SIZE # Calculates the complete centred grid depth covered by the generated dungeon layout.
-    _add_box_collision(collision_body, "FloorCollision", Vector3(dungeon_width, FLOOR_COLLISION_THICKNESS, dungeon_depth), Vector3(0.0, -FLOOR_COLLISION_THICKNESS * 0.5, 0.0)) # Uses one broad box whose top surface aligns exactly with visible floor height and contains no triangle seams.
-    _add_box_collision(collision_body, "CeilingCollision", Vector3(dungeon_width, CEILING_COLLISION_THICKNESS, dungeon_depth), Vector3(0.0, DungeonGeometryBuilder.CEILING_HEIGHT + CEILING_COLLISION_THICKNESS * 0.5, 0.0)) # Uses one broad box whose lower surface aligns exactly with the visible ceiling plane.
-    var wall_builder: StableDungeonCollisionBuilder = StableDungeonCollisionBuilder.new() # Creates the walls-only mesh service so vertical boundaries retain the exact logical dungeon shape.
-    var wall_mesh: ArrayMesh = wall_builder.build_wall_collision_mesh(_layout) # Generates only simplified boundary-wall triangles with no horizontal floor or ceiling faces.
-    if wall_mesh.get_surface_count() <= 0: # Detects a malformed layout that produced no valid boundary collision.
-        return # Leaves the reliable floor and ceiling primitives active while avoiding an empty trimesh resource.
-    var wall_collision: CollisionShape3D = CollisionShape3D.new() # Creates the single direct collision child that owns all generated vertical boundary triangles.
-    wall_collision.name = "WallCollision" # Gives the simplified wall shell an explicit diagnostic name distinct from primitive horizontal contact.
-    wall_collision.shape = wall_mesh.create_trimesh_shape() # Converts only vertical boundary geometry into one static concave collision shape.
-    collision_body.add_child(wall_collision) # Adds the walls directly beneath the static body so Godot includes them in physics queries.
+var _height_field: DungeonHeightField # Stores the authoritative paired floor and ceiling maps shared by rendering, collision, doors, and player spawn grounding.
 
-func _add_box_collision(body: StaticBody3D, node_name: String, size: Vector3, local_position: Vector3) -> void: # Adds one optimized primitive box collision shape directly beneath the shared dungeon StaticBody3D.
-    var collision_shape: CollisionShape3D = CollisionShape3D.new() # Creates the direct physics-shape node required by the owning static body.
-    collision_shape.name = node_name # Assigns a stable descriptive name for collision-debug inspection.
-    collision_shape.position = local_position # Places the primitive so its usable face aligns with the corresponding visible architecture plane.
-    var box_shape: BoxShape3D = BoxShape3D.new() # Uses Godot's reliable optimized primitive shape rather than additional horizontal trimesh triangles.
-    box_shape.size = size # Assigns the complete requested floor or ceiling dimensions without scaling the CollisionShape3D node.
-    collision_shape.shape = box_shape # Installs the primitive resource on the direct physics child.
-    body.add_child(collision_shape) # Adds the completed primitive to the shared static collision owner.
+func get_height_mapped_spawn_position(endpoint: DungeonPairDefinition.Endpoint, distance: float, vertical_clearance: float) -> Vector3: # Returns a global player landing point in front of the exact interior door and grounded to the generated floor map.
+    var door: DungeonDoor = _door_b if endpoint == DungeonPairDefinition.Endpoint.B else _door_a # Selects only the physical interior endpoint corresponding to the requested paired side.
+    if door == null or _height_field == null: # Detects calls before the generated endpoint and height maps are ready.
+        return global_position + get_spawn_position(endpoint) # Falls back to the inherited deterministic flat-space spawn rather than returning an invalid world coordinate.
+    var front_direction: Vector3 = door.get_forward_direction() # Reads the exact physical door axis already used by strict A/B transition routing.
+    front_direction.y = 0.0 # Keeps landing distance horizontal even if future door transforms gain a small pitch component.
+    if front_direction.is_zero_approx(): # Detects a degenerate generated door transform defensively.
+        front_direction = Vector3.FORWARD # Uses a stable conventional fallback only when the physical doorway cannot provide direction.
+    else: # Handles the normal valid generated-door orientation path.
+        front_direction = front_direction.normalized() # Normalizes the horizontal direction before applying the requested physical landing distance.
+    var safe_distance: float = maxf(distance, 0.0) # Prevents malformed callers from placing the player through the selected door onto its blocked outside side.
+    var candidate_global: Vector3 = door.global_position + front_direction * safe_distance # Moves from the exact corresponding door into its traversable endpoint cell.
+    var candidate_local: Vector3 = to_local(candidate_global) # Converts the horizontal landing point into dungeon-local coordinates for authoritative height-map sampling.
+    candidate_local.y = _height_field.sample_floor(candidate_local.x, candidate_local.z, DungeonHeightFieldMeshBuilder.CELL_SIZE) + maxf(vertical_clearance, 0.0) # Grounds the player root directly above the exact bilinearly sampled visible floor height.
+    return to_global(candidate_local) # Converts the height-corrected landing point back into the scene-space coordinates consumed by the player body.
+
+func _build_geometry() -> void: # Generates both height maps first, then derives visible surfaces and physics from those exact shared samples.
+    _height_field = DungeonHeightField.new() # Allocates one authoritative paired-height data source for this disposable deterministic dungeon instance.
+    _height_field.generate(_layout, _dungeon_seed) # Reconstructs the complete floor and ceiling maps from immutable layout and dungeon seed.
+    var mesh_builder: DungeonHeightFieldMeshBuilder = DungeonHeightFieldMeshBuilder.new() # Creates the isolated service that stitches height-field cells and perimeter walls into runtime meshes.
+    var visual_mesh: ArrayMesh = mesh_builder.build_visual_mesh(_layout, _height_field, _dungeon_seed) # Generates walkable floor and ceiling surfaces plus walls joining their exposed edges.
+    var mesh_instance: MeshInstance3D = MeshInstance3D.new() # Creates one render node for the complete height-field dungeon architecture.
+    mesh_instance.name = "GeneratedArchitecture" # Preserves the established diagnostic scene-tree name used for runtime inspection.
+    mesh_instance.mesh = visual_mesh # Installs the combined textureless floor-map, ceiling-map, and wall mesh resource.
+    add_child(mesh_instance) # Adds the complete visible dungeon architecture beneath this disposable world root.
+    var collision_body: StaticBody3D = StaticBody3D.new() # Creates one static physics owner for the height-map floor and stitched ceiling/wall collision shell.
+    collision_body.name = "GeneratedCollision" # Preserves the existing collision owner name for remote-scene debugging.
+    collision_body.collision_layer = WORLD_COLLISION_LAYER # Places the complete interior shell on the player's normal world-collision layer.
+    collision_body.collision_mask = WORLD_COLLISION_LAYER # Retains ordinary static-world collision behavior for future dungeon actors using the same layer.
+    add_child(collision_body) # Installs the physics owner before attaching its direct collision-shape children.
+    _add_floor_heightmap_collision(collision_body) # Uses Godot's dedicated HeightMapShape3D for routine grounded contact against the generated floor map.
+    var wall_ceiling_mesh: ArrayMesh = mesh_builder.build_wall_and_ceiling_collision_mesh(_layout, _height_field) # Rebuilds only overhead and perimeter triangles from the exact same authoritative height samples.
+    if wall_ceiling_mesh.get_surface_count() <= 0: # Detects malformed topology that produced no ceiling or wall triangles.
+        return # Leaves the valid floor heightmap collision active while avoiding an empty concave shape.
+    var wall_ceiling_collision: CollisionShape3D = CollisionShape3D.new() # Creates one direct collision child for the less frequently contacted overhead and vertical mesh surfaces.
+    wall_ceiling_collision.name = "WallCeilingCollision" # Gives the stitched non-floor shell a clear diagnostic identity distinct from the heightmap floor.
+    wall_ceiling_collision.shape = wall_ceiling_mesh.create_trimesh_shape() # Converts inward/downward-wound perimeter and ceiling triangles into one static concave collision resource.
+    collision_body.add_child(wall_ceiling_collision) # Adds the completed ceiling/wall shell directly beneath the shared static body.
+
+func _add_floor_heightmap_collision(collision_body: StaticBody3D) -> void: # Creates one HeightMapShape3D whose samples are the same authoritative floor values used by the visible mesh.
+    var floor_collision: CollisionShape3D = CollisionShape3D.new() # Allocates the direct collision child consumed by the shared dungeon static body.
+    floor_collision.name = "FloorHeightMapCollision" # Gives the primary grounded-contact surface an explicit remote-scene diagnostic name.
+    floor_collision.scale = Vector3.ONE * HEIGHTMAP_COLLISION_SCALE # Uniformly scales the heightmap so one physics-grid interval equals one logical dungeon cell in x and z.
+    var floor_shape: HeightMapShape3D = HeightMapShape3D.new() # Uses Godot's dedicated grid-height collision type instead of a per-cell concave floor triangle shell.
+    floor_shape.map_width = _height_field.vertex_width # Matches collision columns exactly to the authoritative shared floor-map vertex count.
+    floor_shape.map_depth = _height_field.vertex_depth # Matches collision rows exactly to the authoritative shared floor-map depth count.
+    floor_shape.map_data = _height_field.get_scaled_floor_map_data(HEIGHTMAP_COLLISION_SCALE) # Pre-scales vertical values so the uniform collision-node scale restores their intended world-space heights.
+    floor_collision.shape = floor_shape # Assigns the complete deterministic floor heightmap resource to the collision node.
+    collision_body.add_child(floor_collision) # Adds the primary floor collision directly beneath its owning StaticBody3D.
+
+func _get_interior_door_position(endpoint: DungeonPairDefinition.Endpoint) -> Vector3: # Places each interior portal on the generated floor height map instead of assuming a flat zero-elevation threshold.
+    var cell: Vector2i = _layout.door_b_cell if endpoint == DungeonPairDefinition.Endpoint.B else _layout.door_a_cell # Selects the guaranteed walkable endpoint cell corresponding to the requested paired side.
+    var centre: Vector3 = DungeonGeometryBuilder.get_cell_center(_layout, cell, 0.0) # Resolves the horizontal centre of the logical endpoint cell using the established dungeon coordinate convention.
+    var boundary_offset: float = DungeonGeometryBuilder.CELL_SIZE * 0.5 - 0.03 # Keeps the portal plane just inside the enclosing stitched boundary wall as before.
+    if endpoint == DungeonPairDefinition.Endpoint.B: # Detects the east-side interior endpoint.
+        centre.x += boundary_offset # Moves endpoint B onto the eastern boundary of its logical walkable cell.
+    else: # Handles the west-side interior endpoint.
+        centre.x -= boundary_offset # Moves endpoint A onto the western boundary of its logical walkable cell.
+    if _height_field != null: # Confirms authoritative floor samples were generated during the preceding geometry pass.
+        centre.y = _height_field.sample_floor(centre.x, centre.z, DungeonHeightFieldMeshBuilder.CELL_SIZE) # Grounds the physical doorway threshold directly onto the bilinearly sampled floor height map.
+    return centre # Returns the complete dungeon-local portal position consumed by the inherited deterministic door builder.
 
 func _build_procedural_lighting() -> void: # Builds the original deterministic fixtures, then strengthens only their light resources without increasing light count.
     super._build_procedural_lighting() # Reuses the established seeded fixture placement and compatibility-safe seven-light budget.
