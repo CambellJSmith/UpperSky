@@ -5,12 +5,14 @@ var _item_id: StringName # Stores the stable identifier used to combine matching
 var _display_name: String # Stores the human-readable item name shown in the inventory list.
 var _unit_weight: float # Stores the weight contributed by one item in this stack.
 var _quantity: int # Stores the number of currently held items in this stack.
+var _category: int # Stores the stable inventory category used by tab filtering.
 
-func _init(item_id: StringName, display_name: String, unit_weight: float, quantity: int) -> void: # Creates one validated stack from an item definition and quantity.
+func _init(item_id: StringName, display_name: String, unit_weight: float, quantity: int, category: int) -> void: # Creates one validated stack from an item definition, quantity, and inventory category.
     _item_id = item_id # Retains the stable item identifier.
     _display_name = display_name # Retains the user-facing item name.
     _unit_weight = maxf(unit_weight, 0.0) # Prevents negative item weights from reducing carried mass.
     _quantity = maxi(quantity, 0) # Prevents a newly created stack from starting with a negative quantity.
+    _category = category if InventoryCategory.is_valid(category) else InventoryCategory.Type.MISC # Normalizes malformed category values into the safe Misc fallback.
 
 func get_item_id() -> StringName: # Returns the stable identifier for stack matching.
     return _item_id # Exposes the item identifier without allowing mutation.
@@ -23,6 +25,9 @@ func get_unit_weight() -> float: # Returns the weight of one item in this stack.
 
 func get_quantity() -> int: # Returns the number of held items in this stack.
     return _quantity # Exposes the current stack count.
+
+func get_category() -> int: # Returns the stable inventory category assigned when this stack was created.
+    return _category # Exposes category data read-only so interfaces can filter without mutating item identity.
 
 func get_stack_weight() -> float: # Calculates the complete weight contributed by this stack.
     return _unit_weight * float(_quantity) # Multiplies unit weight by held quantity.
