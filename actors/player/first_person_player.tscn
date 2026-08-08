@@ -38,3 +38,4 @@ far = 16000.0
 
 [node name="EquipmentMount" type="Node3D" parent="Head/Camera3D"]
 position = Vector3(0.38, -0.34, -1.1)
+scale = Vector3(0.25, 0.25, 0.25)
