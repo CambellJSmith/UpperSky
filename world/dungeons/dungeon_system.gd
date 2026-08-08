@@ -14,6 +14,7 @@ const MAXIMUM_PAIR_SEPARATION: float = 8000.0 # Allows rare dungeon pairs to con
 const ENDPOINT_GROUND_CLEARANCE: float = 0.035 # Prevents procedural door frames from visually z-fighting with sampled terrain.
 const EXIT_PLAYER_CLEARANCE: float = 0.08 # Places the player root slightly above sampled terrain after returning from a dungeon.
 const EXIT_FORWARD_DISTANCE: float = 2.55 # Places returning players safely outside the portal instead of immediately retriggering the same door.
+const EXIT_COLLISION_SETTLE_FRAMES: int = 2 # Holds player physics briefly after long-range exits so terrain can stream exact collision around the destination first.
 const DRY_SEARCH_RING_COUNT: int = 7 # Bounds deterministic nearby-ground searches when an intended door coordinate lands on water or rough terrain.
 const DRY_SEARCH_DIRECTIONS: int = 12 # Samples enough directions per ring to find nearby suitable terrain without unbounded placement work.
 const DRY_SEARCH_RING_STEP: float = 7.5 # Expands each placement search ring by a moderate physical distance around its intended endpoint.
@@ -37,6 +38,7 @@ var _entrance_root: Node3D # Owns all currently streamed exterior doors as one t
 var _streamed_pairs: Dictionary[int, DungeonPairDefinition] = {} # Stores only deterministic pair definitions currently relevant to the player's overworld neighbourhood.
 var _streamed_pair_roots: Dictionary[int, Node3D] = {} # Stores the generated exterior-door node root corresponding to each currently streamed pair identity.
 var _last_stream_cell: Vector2i = INVALID_STREAM_CELL # Tracks the coarse absolute player cell used to avoid rebuilding the dungeon stream every frame.
+var _exit_collision_settle_frames_remaining: int = 0 # Counts frames while player physics is paused so a distant dungeon exit can acquire local terrain collision safely.
 var _active_pair: DungeonPairDefinition # Stores the pair whose deterministic interior is currently active even when its endpoints are kilometres apart.
 var _active_dungeon: ProceduralDungeonWorld # Stores the disposable generated interior world while the player is inside it.
 
@@ -48,14 +50,18 @@ func _ready() -> void: # Creates the floating-origin entrance owner and waits fo
         _dynamic_entities.add_child(_entrance_root) # Makes all exterior doors inherit the exact same world-rebase shifts as the player and training dummy.
 
 func _process(_delta: float) -> void: # Streams deterministic dungeon pairs as the player explores the unbounded overworld.
+    if _exit_collision_settle_frames_remaining > 0: # Detects a recent dungeon exit that may have moved the player beyond the previously loaded collision neighbourhood.
+        _exit_collision_settle_frames_remaining -= 1 # Gives the resumed terrain streamer another complete frame to build near-player chunks in its normal near-to-far order.
+        if _exit_collision_settle_frames_remaining <= 0 and _player != null: # Detects completion of the short collision-streaming grace period.
+            _player.set_physics_process(true) # Restores gravity and movement only after destination terrain has had time to create active collision.
     if _active_dungeon != null: # Detects that the player currently occupies an isolated dungeon world space.
         return # Leaves the overworld pair stream frozen until the player returns through an interior exit.
     if _terrain == null or _player == null or _entrance_root == null: # Detects incomplete scene composition that cannot support deterministic entrance placement.
         return # Waits for valid dependencies rather than guessing coordinates.
     if _terrain.get_loaded_chunk_count() <= 0: # Detects terrain that has not yet generated the initial collision neighbourhood.
         return # Waits until authoritative height and water context is actively represented around the player.
-    if not _player.is_physics_processing(): # Detects the phase where Game temporarily disables player physics during collision-backed shoreline placement.
-        return # Waits until the player's final deterministic overworld spawn position has been resolved.
+    if not _player.is_physics_processing(): # Detects the initial spawn phase or the brief post-dungeon collision-settling phase.
+        return # Waits until ordinary grounded player physics is safe to resume before updating entrance streaming.
     var player_world_position: Vector3 = _terrain.local_to_world_position(_player.global_position) # Converts the near-origin player transform into stable absolute procedural-world coordinates.
     var player_horizontal: Vector2 = Vector2(player_world_position.x, player_world_position.z) # Extracts the horizontal coordinate used by deterministic region streaming.
     var stream_cell: Vector2i = _get_stream_cell(player_horizontal) # Calculates the smaller coarse cell that controls entrance-stream refresh frequency.
@@ -273,16 +279,18 @@ func _exit_dungeon(pair_id: int, endpoint: DungeonPairDefinition.Endpoint) -> bo
     var return_local_position: Vector3 = _terrain.world_to_local_position(return_world_position) # Converts the stable exterior coordinate into current floating-origin scene space.
     var exit_yaw: float = _active_pair.get_yaw(endpoint) # Reads the deterministic exterior-facing orientation authored for this exact paired side.
     var exit_forward: Vector3 = Vector3(-sin(exit_yaw), 0.0, -cos(exit_yaw)).normalized() # Reconstructs the doorway's world-space forward vector from its stored yaw.
+    _player.set_physics_process(false) # Prevents gravity from advancing before a distant destination's near-player terrain collision has streamed back into the physics world.
     _camera.environment = null # Removes the dungeon-specific override so the overworld WorldEnvironment becomes authoritative again.
     _set_overworld_active(true) # Restores terrain streaming, vegetation, decorations, underwater effects, training target, and exterior doors before player placement.
     _player.initialize_environment(_terrain) # Reconnects swimming and water-state queries to the authoritative procedural overworld terrain.
     _player.velocity = Vector3.ZERO # Clears any interior movement before restoring overworld physics position.
     _player.global_position = return_local_position + exit_forward * EXIT_FORWARD_DISTANCE + Vector3(0.0, EXIT_PLAYER_CLEARANCE, 0.0) # Places the player safely outside the chosen exterior portal at the matching paired endpoint even when it is kilometres from the entry side.
     _player.rotation.y = exit_yaw # Faces the player away from the returned-through doorway to reduce immediate re-entry confusion.
+    _exit_collision_settle_frames_remaining = EXIT_COLLISION_SETTLE_FRAMES # Gives resumed terrain streaming a short bounded window to generate exact collision beneath a long-range exit destination.
     _active_dungeon.queue_free() # Releases all generated layout nodes, meshes, materials, collision, doors, fixtures, and lights after the transition.
     _active_dungeon = null # Clears active interior ownership immediately so future exterior interactions can regenerate the dungeon from seed.
     _active_pair = null # Clears the temporary pair reference while streamed or later reconstructed region metadata remains deterministic.
-    _last_stream_cell = INVALID_STREAM_CELL # Forces the next overworld frame to rebuild the entrance stream around the potentially distant exit endpoint immediately.
+    _last_stream_cell = INVALID_STREAM_CELL # Forces the first safe overworld frame to rebuild the entrance stream around the potentially distant exit endpoint immediately.
     return true # Reports that paired return travel completed successfully.
 
 func _set_overworld_active(enabled: bool) -> void: # Enables or suspends expensive overworld-only systems while retaining their deterministic state in memory.
