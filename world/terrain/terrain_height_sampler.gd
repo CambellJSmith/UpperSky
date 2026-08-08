@@ -188,7 +188,9 @@ func sample_height(world_x: float, world_z: float) -> float: # Returns the deter
     var spawn_height: float = plateau_relief * 0.14 + surface_detail * 0.20 # Keeps the initial region gently rolling without mountain walls.
     var procedural_height: float = lerpf(spawn_height, full_height, spawn_blend) # Blends the safe start into the complete world.
     var flat_blend: float = smoothstep(SPAWN_FLAT_RADIUS, SPAWN_FLAT_BLEND_RADIUS, spawn_distance) # Keeps the innermost spawn circle exactly level.
-    return lerpf(SPAWN_FLAT_HEIGHT, procedural_height, flat_blend) # Returns the final deterministic geological terrain height.
+    var terrain_height: float = lerpf(SPAWN_FLAT_HEIGHT, procedural_height, flat_blend) # Resolves the original deterministic geological terrain height.
+    var path_wear_offset: float = TerrainPathSampler.get_height_offset(Vector2(world_x, world_z)) * flat_blend # Adds shallow compacted wear while preserving the exact flat spawn centre.
+    return terrain_height + path_wear_offset # Returns terrain with the shared worn-path depression applied.
 
 func _sample_broad_ridge_support(sample_x: float, sample_z: float, centre_ridge: float) -> float: # Measures broad ridge support so narrow protrusions cannot receive full mountain height.
     var east_ridge: float = _sample_normalized(_mountain_ridge_noise, sample_x + MOUNTAIN_WIDTH_SAMPLE_DISTANCE, sample_z) # Samples ridge support to the east.
