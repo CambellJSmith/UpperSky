@@ -13,8 +13,8 @@ func _init() -> void: # Builds the low-frequency deterministic fields shared wit
     _warp_x_noise = _create_noise(11, 0.000075, 3, 0.52, 2.0, FastNoiseLite.FRACTAL_FBM) # Matches terrain x-axis continental distortion.
     _warp_z_noise = _create_noise(23, 0.000075, 3, 0.52, 2.0, FastNoiseLite.FRACTAL_FBM) # Matches terrain z-axis continental distortion.
     _continent_noise = _create_noise(37, 0.000020, 4, 0.5, 2.0, FastNoiseLite.FRACTAL_FBM) # Matches extremely broad continental rises and depressions.
-    _tier_noise = _create_noise(41, 0.000038, 4, 0.52, 2.0, FastNoiseLite.FRACTAL_FBM) # Matches long regional elevation provinces.
-    _tier_breakup_noise = _create_noise(53, 0.000085, 3, 0.48, 2.0, FastNoiseLite.FRACTAL_FBM) # Matches broad province-contour breakup.
+    _tier_noise = _create_noise(41, TerrainHeightSampler.REGIONAL_TIER_NOISE_FREQUENCY, 4, 0.52, 2.0, FastNoiseLite.FRACTAL_FBM) # Matches the more frequently recurring regional elevation provinces used by terrain.
+    _tier_breakup_noise = _create_noise(53, TerrainHeightSampler.REGIONAL_TIER_BREAKUP_NOISE_FREQUENCY, 3, 0.48, 2.0, FastNoiseLite.FRACTAL_FBM) # Matches the more active broad province-contour breakup used by terrain.
     _plateau_noise = _create_noise(59, 0.00022, 4, 0.48, 2.0, FastNoiseLite.FRACTAL_FBM) # Matches rolling plains, plateaus, and uplands.
     _basin_noise = _create_noise(61, 0.000075, 3, 0.5, 2.0, FastNoiseLite.FRACTAL_FBM) # Matches broad sedimentary basin regions.
 
@@ -26,8 +26,8 @@ func sample_water_level(world_x: float, world_z: float) -> float: # Returns one 
     var continent_value: float = _sample_normalized(_continent_noise, sample_x, sample_z) # Reads the continental elevation tendency.
     var tier_value: float = _sample_normalized(_tier_noise, sample_x, sample_z) # Reads secondary regional variation.
     var tier_breakup_value: float = _sample_normalized(_tier_breakup_noise, sample_x, sample_z) # Reads broad province-contour breakup.
-    var macro_elevation: float = clampf(continent_value * 0.60 + tier_value * 0.30 + tier_breakup_value * 0.10, 0.0, 1.0) # Matches terrain's continental and regional weighting.
-    macro_elevation = lerpf(0.08, 0.92, smoothstep(0.05, 0.95, macro_elevation)) # Matches terrain's retained high and low regional range.
+    var macro_elevation: float = clampf(continent_value * TerrainHeightSampler.MACRO_CONTINENT_WEIGHT + tier_value * TerrainHeightSampler.MACRO_TIER_WEIGHT + tier_breakup_value * TerrainHeightSampler.MACRO_BREAKUP_WEIGHT, 0.0, 1.0) # Uses the exact macro field weighting authored by terrain generation.
+    macro_elevation = lerpf(TerrainHeightSampler.MACRO_ELEVATION_MINIMUM, TerrainHeightSampler.MACRO_ELEVATION_MAXIMUM, smoothstep(TerrainHeightSampler.MACRO_SMOOTH_START, TerrainHeightSampler.MACRO_SMOOTH_END, macro_elevation)) # Uses the exact high-low regional remapping authored by terrain generation.
     var tier_height: float = _get_tier_height(macro_elevation) # Reconstructs continuous regional elevation.
     var plateau_relief: float = _plateau_noise.get_noise_2d(sample_x, sample_z) * TerrainHeightSampler.PLATEAU_UNDULATION_HEIGHT # Reads rolling local relief.
     var basin_value: float = _sample_normalized(_basin_noise, sample_x, sample_z) # Reads sedimentary basin placement.
