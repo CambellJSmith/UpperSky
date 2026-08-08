@@ -1,9 +1,10 @@
 extends RefCounted # Stores one deterministic relationship between two overworld entrances and one shared dungeon interior.
-class_name DungeonPairDefinition # Exposes strongly typed pair data to overworld placement and dungeon transitions.
+class_name DungeonPairDefinition # Exposes strongly typed pair data to overworld streaming and dungeon transitions.
 
 enum Endpoint { A, B } # Identifies which side of the paired dungeon connection a door represents.
 
-var pair_id: int = 0 # Stores the stable numeric identity used to distinguish this dungeon from every other pair.
+var pair_id: int = 0 # Stores the stable numeric identity derived from the pair's infinite overworld region coordinate.
+var region_coordinate: Vector2i = Vector2i.ZERO # Stores the deterministic infinite-region coordinate that owns this dungeon pair.
 var dungeon_seed: int = 0 # Stores the deterministic seed used to reconstruct the exact same interior on every visit.
 var endpoint_a_world_position: Vector3 = Vector3.ZERO # Stores exterior endpoint A in absolute procedural-overworld coordinates.
 var endpoint_b_world_position: Vector3 = Vector3.ZERO # Stores exterior endpoint B in absolute procedural-overworld coordinates.
@@ -22,4 +23,4 @@ func get_yaw(endpoint: Endpoint) -> float: # Returns the authored-facing angle a
 
 func get_display_name(endpoint: Endpoint) -> String: # Builds a concise diagnostic label for one exterior or interior door.
     var endpoint_name: String = "B" if endpoint == Endpoint.B else "A" # Converts the stable endpoint enum into the player-facing side letter.
-    return "DUNGEON %d%s" % [pair_id + 1, endpoint_name] # Combines the one-based pair number with the endpoint letter for readable labels.
+    return "DUNGEON [%d,%d] %s" % [region_coordinate.x, region_coordinate.y, endpoint_name] # Uses the owning infinite-region coordinate so streamed pairs remain identifiable without sequential numbering.
