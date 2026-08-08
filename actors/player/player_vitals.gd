@@ -90,26 +90,24 @@ func set_maximum_health(value: float) -> void: # Changes maximum health and clam
     if is_equal_approx(next_maximum, _maximum_health): # Detects a no-op maximum assignment.
         return # Leaves the revision unchanged when nothing changed.
     _maximum_health = next_maximum # Stores the validated maximum health.
-    var next_health: float = _maximum_health if _infinite_health_enabled else minf(_health, _maximum_health) # Keeps protected health full while ordinary health only clamps downward when required.
-    var health_changed: bool = not is_equal_approx(next_health, _health) # Detects whether changing the maximum also changes the displayed current value.
-    _health = next_health # Stores the normalized current health after the maximum change.
-    _revision += 1 # Marks the changed range and any resulting current-health change for polling consumers.
-    if not health_changed: # Detects a maximum-only change after the required revision increment.
-        return # Keeps the explicit branch so the current-value normalization remains easy to audit.
+    _health = _maximum_health if _infinite_health_enabled else minf(_health, _maximum_health) # Keeps protected health full while ordinary health only clamps downward when required.
+    _revision += 1 # Marks the changed health range and any resulting current-health normalization for polling consumers.
 
 func set_stamina(value: float) -> void: # Changes current stamina while respecting its current maximum and developer protection state.
     var requested_value: float = _maximum_stamina if _infinite_stamina_enabled else value # Forces maximum stamina while developer infinite-stamina protection is active.
     _set_stamina_internal(requested_value) # Applies the normalized request through the shared clamped revision-tracked mutation path.
 
-func consume_stamina(amount: float) -> float: # Spends up to the requested stamina and reports the amount actually consumed.
-    if _infinite_stamina_enabled: # Detects developer stamina protection before exertion can alter the resource pool.
-        return 0.0 # Reports no resource consumption while still allowing callers to perform their requested movement behavior.
+func consume_stamina(amount: float) -> float: # Spends up to the requested stamina and reports the amount gameplay may treat as successfully consumed.
     var requested_amount: float = maxf(amount, 0.0) # Rejects negative consumption without turning it into recovery.
-    if is_zero_approx(requested_amount) or is_zero_approx(_stamina): # Detects a no-op request or an already empty pool.
+    if is_zero_approx(requested_amount): # Detects a no-op resource request before ordinary or protected handling.
+        return 0.0 # Reports that no stamina operation was required.
+    if _infinite_stamina_enabled: # Detects developer stamina protection before exertion can alter the resource pool.
+        return requested_amount # Reports the spend as satisfied so sprint, climb, swim, and jump logic continues while stored stamina remains full.
+    if is_zero_approx(_stamina): # Detects an ordinary stamina pool that is already empty.
         return 0.0 # Reports that no stamina could be consumed.
     var previous_stamina: float = _stamina # Retains the prior value so partial final-frame spending can be reported accurately.
     set_stamina(_stamina - requested_amount) # Uses the ordinary clamped setter so HUD revision tracking remains authoritative.
-    return previous_stamina - _stamina # Returns the exact amount removed, including a partial spend at exhaustion.
+    return previous_stamina - _stamina # Returns the exact amount removed, including a partial final spend at exhaustion.
 
 func restore_stamina(amount: float) -> float: # Restores up to the requested stamina and reports the amount actually recovered.
     var requested_amount: float = maxf(amount, 0.0) # Rejects negative recovery without turning it into consumption.
