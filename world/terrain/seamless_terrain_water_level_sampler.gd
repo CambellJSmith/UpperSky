@@ -9,8 +9,8 @@ func sample_water_level(world_x: float, world_z: float) -> float: # Returns one 
     var continent_value: float = _sample_normalized(_continent_noise, sample_x, sample_z) # Reads the same broad continental elevation tendency as terrain generation.
     var tier_value: float = _sample_normalized(_tier_noise, sample_x, sample_z) # Reads the same secondary regional elevation field as terrain generation.
     var tier_breakup_value: float = _sample_normalized(_tier_breakup_noise, sample_x, sample_z) # Reads the same broad contour-breakup field as terrain generation.
-    var macro_elevation: float = clampf(continent_value * 0.60 + tier_value * 0.30 + tier_breakup_value * 0.10, 0.0, 1.0) # Reconstructs the terrain generator's weighted regional elevation coordinate.
-    macro_elevation = lerpf(0.08, 0.92, smoothstep(0.05, 0.95, macro_elevation)) # Retains the same compressed geological high and low range as the terrain generator.
+    var macro_elevation: float = clampf(continent_value * TerrainHeightSampler.MACRO_CONTINENT_WEIGHT + tier_value * TerrainHeightSampler.MACRO_TIER_WEIGHT + tier_breakup_value * TerrainHeightSampler.MACRO_BREAKUP_WEIGHT, 0.0, 1.0) # Reconstructs the exact terrain generator weighting from shared constants.
+    macro_elevation = lerpf(TerrainHeightSampler.MACRO_ELEVATION_MINIMUM, TerrainHeightSampler.MACRO_ELEVATION_MAXIMUM, smoothstep(TerrainHeightSampler.MACRO_SMOOTH_START, TerrainHeightSampler.MACRO_SMOOTH_END, macro_elevation)) # Reconstructs the exact terrain generator high-low regional remapping.
     var tier_height: float = _get_tier_height(macro_elevation) # Reconstructs the continuous broad geological province elevation.
     var plateau_relief: float = _plateau_noise.get_noise_2d(sample_x, sample_z) * TerrainHeightSampler.PLATEAU_UNDULATION_HEIGHT # Reads the same rolling local relief used by regional water selection.
     var basin_value: float = _sample_normalized(_basin_noise, sample_x, sample_z) # Reads the same broad sedimentary basin placement field.
