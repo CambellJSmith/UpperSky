@@ -1,6 +1,6 @@
 [gd_scene load_steps=6 format=3]
 
-[ext_resource type="Script" path="res://world/terrain/infinite_terrain.gd" id="1_terrain"]
+[ext_resource type="Script" path="res://world/terrain/seamless_infinite_terrain.gd" id="1_terrain"]
 [ext_resource type="Script" path="res://world/environments/day_night_cycle.gd" id="2_cycle"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_world"]
