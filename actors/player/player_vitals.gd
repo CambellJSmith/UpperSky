@@ -1,5 +1,5 @@
 extends Node # Owns authoritative player health, stamina, and mana values independently from their interface presentation.
-class_name PlayerVitals # Makes the player resource model available to HUD, inventory, and future gameplay systems.
+class_name PlayerVitals # Makes the player resource model available to HUD, inventory, combat, and future gameplay systems.
 
 const MINIMUM_MAXIMUM_VALUE: float = 0.001 # Prevents invalid zero-range resources when a maximum is changed dynamically.
 const DEFAULT_MAXIMUM_HEALTH: float = 100.0 # Defines the initial maximum health displayed by the existing red status bar.
@@ -37,6 +37,14 @@ func get_maximum_mana() -> float: # Returns the current maximum mana value.
 
 func get_revision() -> int: # Reports whether any resource has changed since a caller last refreshed.
     return _revision # Returns the monotonically increasing resource revision.
+
+func apply_damage(amount: float) -> float: # Removes positive health through the existing clamped revision-tracked player resource model and reports actual damage applied.
+    var requested_damage: float = maxf(amount, 0.0) # Rejects negative damage without allowing combat systems to heal the player accidentally.
+    if is_zero_approx(requested_damage) or is_zero_approx(_health): # Detects a no-op request or a player whose health is already fully depleted.
+        return 0.0 # Reports that no health could be removed for the rejected request.
+    var previous_health: float = _health # Captures pre-hit health so callers can know the exact clamped damage that changed state.
+    set_health(_health - requested_damage) # Applies damage through the normal setter so maximum clamping and HUD revision tracking remain authoritative.
+    return previous_health - _health # Returns the exact health removed, including a partial final hit that reaches zero.
 
 func set_health(value: float) -> void: # Changes current health while respecting its current maximum.
     var next_value: float = clampf(value, 0.0, _maximum_health) # Restricts health to its valid range.
