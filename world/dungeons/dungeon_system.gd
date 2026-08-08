@@ -11,6 +11,12 @@ const PAIR_UNLOAD_DISTANCE: float = 2700.0 # Keeps already loaded pairs slightly
 const REGION_MIDPOINT_MARGIN: float = 0.14 # Keeps each pair midpoint away from its owning region boundary while still disguising the underlying region grid.
 const MINIMUM_PAIR_SEPARATION: float = 120.0 # Allows compact local shortcut dungeons while keeping the two exterior endpoints clearly distinct after terrain correction.
 const MAXIMUM_PAIR_SEPARATION: float = 8000.0 # Allows rare dungeon pairs to connect overworld locations several kilometres apart.
+const STARTING_DOOR_FORWARD_DISTANCE: float = 12.0 # Targets the first dungeon entrance close enough to be unmistakably visible in the initial first-person view.
+const STARTING_DOOR_FORWARD_STEP: float = 4.0 # Extends the forward search through several visible candidate distances when the preferred ground is unsuitable.
+const STARTING_DOOR_FORWARD_ATTEMPTS: int = 5 # Keeps the complete startup placement search bounded while covering twelve through twenty-eight metres ahead.
+const STARTING_DOOR_LATERAL_STEP: float = 2.5 # Moves alternate startup candidates slightly sideways while retaining them comfortably inside the camera's view cone.
+const STARTING_DOOR_LATERAL_ATTEMPTS_PER_SIDE: int = 2 # Tests two small offsets on either side of the view centre at each forward distance.
+const STARTING_DOOR_FALLBACK_DISTANCE: float = 8.0 # Guarantees a final close centred entrance even if every preferred low-slope candidate fails.
 const ENDPOINT_GROUND_CLEARANCE: float = 0.035 # Prevents procedural door frames from visually z-fighting with sampled terrain.
 const EXIT_PLAYER_CLEARANCE: float = 0.08 # Places the player root slightly above sampled terrain after returning from a dungeon.
 const EXIT_FORWARD_DISTANCE: float = 2.55 # Places returning players safely outside the portal instead of immediately retriggering the same door.
@@ -38,6 +44,8 @@ var _entrance_root: Node3D # Owns all currently streamed exterior doors as one t
 var _streamed_pairs: Dictionary[int, DungeonPairDefinition] = {} # Stores only deterministic pair definitions currently relevant to the player's overworld neighbourhood.
 var _streamed_pair_roots: Dictionary[int, Node3D] = {} # Stores the generated exterior-door node root corresponding to each currently streamed pair identity.
 var _last_stream_cell: Vector2i = INVALID_STREAM_CELL # Tracks the coarse absolute player cell used to avoid rebuilding the dungeon stream every frame.
+var _starting_region_coordinate: Vector2i = INVALID_STREAM_CELL # Stores the infinite region whose normal pair is replaced by the guaranteed visible startup pair.
+var _starting_pair: DungeonPairDefinition # Retains the startup pair definition so unstreaming and revisiting reconstruct the same two exterior endpoints during this session.
 var _exit_collision_settle_frames_remaining: int = 0 # Counts frames while player physics is paused so a distant dungeon exit can acquire local terrain collision safely.
 var _active_pair: DungeonPairDefinition # Stores the pair whose deterministic interior is currently active even when its endpoints are kilometres apart.
 var _active_dungeon: ProceduralDungeonWorld # Stores the disposable generated interior world while the player is inside it.
@@ -64,6 +72,8 @@ func _process(_delta: float) -> void: # Streams deterministic dungeon pairs as t
         return # Waits until ordinary grounded player physics is safe to resume before updating entrance streaming.
     var player_world_position: Vector3 = _terrain.local_to_world_position(_player.global_position) # Converts the near-origin player transform into stable absolute procedural-world coordinates.
     var player_horizontal: Vector2 = Vector2(player_world_position.x, player_world_position.z) # Extracts the horizontal coordinate used by deterministic region streaming.
+    if _starting_pair == null: # Detects the first safe post-spawn frame before any ordinary region pair can be materialized around the player.
+        _initialize_starting_pair(player_horizontal) # Replaces the player's starting-region pair with one entrance intentionally placed inside the initial camera view.
     var stream_cell: Vector2i = _get_stream_cell(player_horizontal) # Calculates the smaller coarse cell that controls entrance-stream refresh frequency.
     if stream_cell == _last_stream_cell: # Detects ordinary movement that has not crossed far enough to require pair-stream reconsideration.
         return # Reuses the currently streamed entrance set without repeated procedural placement work.
@@ -111,7 +121,7 @@ func _refresh_overworld_pairs(player_horizontal: Vector2) -> void: # Rebuilds th
                 if _is_pair_within_distance(existing_pair, player_horizontal, PAIR_UNLOAD_DISTANCE): # Applies the larger retention distance to avoid load/unload oscillation.
                     desired_pair_ids[pair_id] = true # Keeps the existing pair and both generated door nodes alive for this stream cycle.
                 continue # Avoids reconstructing an already streamed pair from its seed.
-            var new_pair: DungeonPairDefinition = _build_pair_if_nearby(region_coordinate, player_horizontal) # Generates metadata only when one intended endpoint is close enough to matter.
+            var new_pair: DungeonPairDefinition = _build_stream_pair_for_region(region_coordinate, player_horizontal) # Uses the special visible startup pair for its region and normal deterministic generation everywhere else.
             if new_pair == null: # Detects a deterministic region whose two endpoints are currently outside the load neighbourhood.
                 continue # Leaves that infinite region represented only by its implicit seed until the player approaches either endpoint later.
             desired_pair_ids[pair_id] = true # Marks the newly relevant pair before constructing its physical door nodes.
@@ -122,6 +132,63 @@ func _refresh_overworld_pairs(player_horizontal: Vector2) -> void: # Rebuilds th
             pairs_to_remove.append(pair_id) # Defers node release and dictionary mutation until key iteration has completed.
     for pair_id: int in pairs_to_remove: # Removes every stale pair after the immutable iteration phase.
         _unstream_pair(pair_id) # Releases its generated doors and metadata while preserving the ability to reconstruct them identically later.
+
+func _initialize_starting_pair(player_horizontal: Vector2) -> void: # Constructs one deterministic pair whose A entrance is guaranteed to appear directly in the player's initial view.
+    _starting_region_coordinate = _get_region_coordinate(player_horizontal) # Assigns the visible startup pair to the infinite region containing the resolved shoreline spawn.
+    var pair_id: int = _get_pair_id(_starting_region_coordinate) # Reuses the normal region identity so the starter pair replaces rather than duplicates that region's dungeon.
+    var pair_seed: int = _get_pair_random_seed(pair_id) # Derives the same stable world-and-region random stream used by every ordinary pair.
+    var rng: RandomNumberGenerator = RandomNumberGenerator.new() # Creates isolated startup-pair randomness without consuming mutable global random state.
+    rng.seed = pair_seed # Resets partner distance, direction, and interior identity deterministically for every new game with the same world seed.
+    var camera_forward: Vector2 = _get_camera_horizontal_forward() # Reads the actual post-spawn first-person view direction rather than assuming a world-axis orientation.
+    var endpoint_a: Vector2 = _find_starting_door_ground(player_horizontal, camera_forward) # Finds dry low-slope ground close to the centre of the player's visible forward cone.
+    var separation: float = _sample_pair_separation(rng) # Preserves the complete ordinary short-to-eight-kilometre separation variety for the starter pair's remote endpoint.
+    var partner_angle: float = rng.randf_range(0.0, TAU) # Chooses an unrestricted deterministic direction from the visible entrance to its paired overworld destination.
+    var partner_direction: Vector2 = Vector2(cos(partner_angle), sin(partner_angle)) # Converts the seeded angle into the horizontal direction used by endpoint B.
+    var intended_b: Vector2 = endpoint_a + partner_direction * separation # Places the remote partner at the full sampled pair distance from the guaranteed visible entrance.
+    var endpoint_b: Vector2 = _find_suitable_door_ground(intended_b) # Corrects the remote partner onto nearby dry low-slope terrain using the normal deterministic search.
+    var pair: DungeonPairDefinition = DungeonPairDefinition.new() # Allocates the same strongly typed metadata contract used by every streamed dungeon pair.
+    pair.pair_id = pair_id # Assigns the starting region's stable pair identity for interaction and interior routing.
+    pair.region_coordinate = _starting_region_coordinate # Retains the owning infinite-region coordinate so streaming can reconstruct the special pair later.
+    pair.dungeon_seed = pair_seed ^ 7_919_357 # Derives the deterministic interior stream identically to normal region-owned dungeon pairs.
+    pair.endpoint_a_world_position = Vector3(endpoint_a.x, _terrain.get_height_at(endpoint_a) + ENDPOINT_GROUND_CLEARANCE, endpoint_a.y) # Grounds the visible entrance on authoritative procedural terrain.
+    pair.endpoint_b_world_position = Vector3(endpoint_b.x, _terrain.get_height_at(endpoint_b) + ENDPOINT_GROUND_CLEARANCE, endpoint_b.y) # Grounds the remote partner independently at its deterministic destination.
+    pair.endpoint_a_yaw = _get_yaw_facing_target(endpoint_a, player_horizontal) # Faces the startup portal back toward the initial player position so its frame reads clearly on load.
+    pair.endpoint_b_yaw = _get_yaw_facing_target(endpoint_b, endpoint_a) # Faces the remote portal broadly toward its matching visible endpoint for coherent pairing.
+    _starting_pair = pair # Caches the complete definition so unloading and returning later never changes the startup pair during the active session.
+
+func _get_camera_horizontal_forward() -> Vector2: # Converts the resolved first-person camera orientation into a stable normalized horizontal placement direction.
+    var forward_3d: Vector3 = Vector3(0.0, 0.0, -1.0) # Provides Godot's conventional forward direction if the camera is unexpectedly unavailable.
+    if _camera != null: # Detects the normal initialized first-person camera path.
+        forward_3d = -_camera.global_transform.basis.z # Reads the camera's actual forward vector including the player's current yaw and head pitch.
+    elif _player != null: # Handles an unlikely camera initialization failure while the player root still exists.
+        forward_3d = -_player.global_transform.basis.z # Falls back to the player's horizontal facing direction.
+    var horizontal_forward: Vector2 = Vector2(forward_3d.x, forward_3d.z) # Removes pitch so terrain placement stays on the horizontal overworld plane.
+    if horizontal_forward.is_zero_approx(): # Detects a degenerate straight-up or straight-down view direction defensively.
+        return Vector2(0.0, -1.0) # Uses the conventional negative-z forward axis when horizontal projection has no usable magnitude.
+    return horizontal_forward.normalized() # Returns the view-centred horizontal direction used by the bounded startup placement search.
+
+func _find_starting_door_ground(player_horizontal: Vector2, forward_direction: Vector2) -> Vector2: # Searches only inside a narrow forward cone so the first dungeon opening remains visible at load.
+    var right_direction: Vector2 = Vector2(-forward_direction.y, forward_direction.x).normalized() # Builds the horizontal camera-right axis used for small symmetric lateral placement alternatives.
+    var lateral_candidate_count: int = STARTING_DOOR_LATERAL_ATTEMPTS_PER_SIDE * 2 + 1 # Counts the centred candidate plus matching positive and negative offsets at every forward distance.
+    for forward_index: int in range(STARTING_DOOR_FORWARD_ATTEMPTS): # Tests progressively farther positions that all remain close enough to be obvious in the initial view.
+        var forward_distance: float = STARTING_DOOR_FORWARD_DISTANCE + float(forward_index) * STARTING_DOOR_FORWARD_STEP # Calculates the current view-centred distance from the resolved player spawn.
+        for lateral_index: int in range(lateral_candidate_count): # Tests the centre line first and then increasingly wide symmetric offsets.
+            var lateral_offset: float = 0.0 # Keeps the first candidate exactly centred in the player's initial camera direction.
+            if lateral_index > 0: # Detects one of the alternating right-left fallback candidates.
+                var lateral_step_index: int = (lateral_index + 1) >> 1 # Converts alternating candidate indices into one-based offset magnitudes without integer-division ambiguity.
+                var lateral_sign: float = 1.0 if lateral_index % 2 == 1 else -1.0 # Alternates right and left so neither side receives a deterministic search preference beyond equal distance.
+                lateral_offset = float(lateral_step_index) * STARTING_DOOR_LATERAL_STEP * lateral_sign # Calculates the small sideways displacement while keeping the entrance inside the visible cone.
+            var candidate: Vector2 = player_horizontal + forward_direction * forward_distance + right_direction * lateral_offset # Builds the absolute procedural-world candidate in front of the initial camera.
+            if _is_suitable_door_ground(candidate): # Tests the same dry-ground and local-slope constraints used by ordinary streamed dungeon entrances.
+                return candidate # Uses the first valid view-centred point so the opening is both visible and naturally grounded.
+    return player_horizontal + forward_direction * STARTING_DOOR_FALLBACK_DISTANCE # Prioritizes the explicit visibility guarantee with a close centred fallback if every preferred terrain sample fails.
+
+func _build_stream_pair_for_region(region_coordinate: Vector2i, player_horizontal: Vector2) -> DungeonPairDefinition: # Chooses between the persistent visible startup pair and ordinary infinite-region pair generation.
+    if _starting_pair != null and region_coordinate == _starting_region_coordinate: # Detects the unique region whose ordinary pair was replaced at initial load.
+        if _is_pair_within_distance(_starting_pair, player_horizontal, PAIR_LOAD_DISTANCE): # Uses the normal endpoint-distance stream rule so the special pair still unloads cleanly when distant.
+            return _starting_pair # Reuses the exact cached startup metadata whenever either endpoint becomes relevant again.
+        return null # Leaves the special pair implicit while both of its endpoints are outside the active stream neighbourhood.
+    return _build_pair_if_nearby(region_coordinate, player_horizontal) # Uses unchanged procedural placement for every other infinite overworld region.
 
 func _build_pair_if_nearby(region_coordinate: Vector2i, player_horizontal: Vector2) -> DungeonPairDefinition: # Reconstructs one region-owned pair only when an endpoint is near enough to enter the streamed overworld set.
     var pair_id: int = _get_pair_id(region_coordinate) # Calculates the deterministic identity shared by placement, labels, interior generation, and return routing.
