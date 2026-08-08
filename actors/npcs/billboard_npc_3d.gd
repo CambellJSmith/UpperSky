@@ -29,3 +29,11 @@ func configure_billboard(texture: Texture2D, physical_size: Vector2) -> void: # 
 
 func get_billboard_visual() -> MeshInstance3D: # Returns the required billboard mesh for small animation offsets without exposing replacement 3D model paths.
     return _billboard_visual # Provides controlled access to the established texture-backed character presentation node.
+
+func get_gravity() -> Vector3: # Provides the project gravity vector to NPC subclasses because CharacterBody3D itself does not expose a gravity helper in Godot 4.6.
+    var gravity_strength: float = float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)) # Reads the same authoritative project gravity strength used by the existing first-person player controller.
+    var gravity_direction_variant: Variant = ProjectSettings.get_setting("physics/3d/default_gravity_vector", Vector3.DOWN) # Reads the configured project gravity direction without assuming a hard-coded downward vector.
+    var gravity_direction: Vector3 = gravity_direction_variant as Vector3 if gravity_direction_variant is Vector3 else Vector3.DOWN # Converts the project setting to a typed vector while retaining a safe downward fallback.
+    if gravity_direction.is_zero_approx(): # Detects a malformed zero-length project gravity direction that cannot be normalized safely.
+        gravity_direction = Vector3.DOWN # Restores the conventional downward direction for invalid project configuration.
+    return gravity_direction.normalized() * gravity_strength # Returns the complete acceleration vector consumed by CharacterBody NPC movement.
