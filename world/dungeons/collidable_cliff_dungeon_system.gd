@@ -1,5 +1,5 @@
 extends PreciseCliffDungeonSystem # Retains exact A/B transition routing while adding deeply embedded collidable exterior portals and a stable height-mapped interior pocket.
-class_name CollidableCliffDungeonSystem # Exposes the complete cliff-only paired-dungeon runtime with precise spawns, exterior collision, and height-field interior movement.
+class_name CollidableCliffDungeonSystem # Exposes the complete cliff-only paired-dungeon runtime with precise spawns, exterior collision, and stable height-field interior movement.
 
 const DUNGEON_POCKET_ORIGIN: Vector3 = Vector3(0.0, -1024.0, 0.0) # Isolates interiors safely below the terrain's bounded low elevations while keeping physics coordinates far closer to origin than the previous twenty-kilometre pocket.
 const INTERIOR_SAFE_SPAWN_DISTANCE: float = 1.85 # Places the player close to the centre of the endpoint cell so the capsule starts well clear of the boundary wall and portal plane.
@@ -12,11 +12,11 @@ func _enter_dungeon(pair_id: int, endpoint: DungeonPairDefinition.Endpoint) -> b
     if pair == null: # Detects stale exterior interaction metadata that no longer maps to an active deterministic pair.
         return false # Refuses to guess a destination when authoritative pair metadata is unavailable.
     _active_pair = pair # Retains the exact pair so either interior endpoint can route back to its correct exterior counterpart later.
-    var readable_dungeon: ReadableProceduralDungeonWorld = ReadableProceduralDungeonWorld.new() # Creates the deterministic interior specialization driven by paired floor and ceiling height maps.
-    _active_dungeon = readable_dungeon # Stores the height-mapped subclass through the existing base dungeon ownership contract.
+    var stable_dungeon: StableWallProceduralDungeonWorld = StableWallProceduralDungeonWorld.new() # Creates the deterministic paired-height-map interior with primitive wall collision instead of concave vertical triangles.
+    _active_dungeon = stable_dungeon # Stores the stable wall subclass through the existing base dungeon ownership contract.
     _active_dungeon.name = "ActiveDungeon_%d_%d" % [pair.region_coordinate.x, pair.region_coordinate.y] # Gives the generated interior its stable region-coordinate diagnostic identity.
     _active_dungeon.position = DUNGEON_POCKET_ORIGIN # Places collision near enough to origin for reliable millimetre-scale CharacterBody recovery while remaining far below overworld terrain.
-    _active_dungeon.build(pair.pair_id, pair.dungeon_seed, pair.region_coordinate) # Reconstructs topology, paired height maps, meshes, collision, doors, fixtures, and lighting from the immutable pair seed.
+    _active_dungeon.build(pair.pair_id, pair.dungeon_seed, pair.region_coordinate) # Reconstructs topology, paired height maps, visible meshes, primitive walls, ceiling collision, doors, fixtures, and lighting from the immutable pair seed.
     add_child(_active_dungeon) # Installs the generated world so its exact physical interior-door transforms are authoritative before player placement.
     var arrival_door: DungeonDoor = _find_matching_interior_door(pair_id, endpoint) # Resolves only the interior door whose pair identity and A/B endpoint match the exterior interaction source.
     if arrival_door == null: # Detects any generated endpoint mismatch before altering overworld/player state.
@@ -24,7 +24,7 @@ func _enter_dungeon(pair_id: int, endpoint: DungeonPairDefinition.Endpoint) -> b
         _active_dungeon = null # Clears active interior ownership after rejecting the malformed transition.
         _active_pair = null # Clears pair state because entry did not complete.
         return false # Fails closed so endpoint correspondence can never silently drift.
-    var arrival_position: Vector3 = readable_dungeon.get_height_mapped_spawn_position(endpoint, INTERIOR_SAFE_SPAWN_DISTANCE, INTERIOR_SAFE_FLOOR_CLEARANCE) # Moves inward from the exact corresponding door, then grounds the player to the authoritative floor height map at that actual landing coordinate.
+    var arrival_position: Vector3 = stable_dungeon.get_height_mapped_spawn_position(endpoint, INTERIOR_SAFE_SPAWN_DISTANCE, INTERIOR_SAFE_FLOOR_CLEARANCE) # Moves inward from the exact corresponding door, then grounds the player to the authoritative floor height map at that actual landing coordinate.
     var arrival_yaw: float = DungeonSpawnResolver.get_yaw_facing_front(arrival_door) # Faces the player directly into traversable dungeon space using the same physical door transform.
     _set_overworld_active(false) # Suspends terrain streaming, decoration, exterior portals, and other overworld-only presentation before relocation.
     _player.initialize_environment(null) # Detaches terrain water queries while the player occupies the isolated interior pocket.
