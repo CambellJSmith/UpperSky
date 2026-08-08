@@ -196,7 +196,8 @@ func _refresh_terrain_map() -> void:
                 _terrain_map_world_origin.y + float(sample_z) * TERRAIN_VERTEX_SPACING
             )
             var regional_density: float = lerpf(0.90, 1.0, _sample_noise(_coverage_noise, world_position))
-            var coverage: float = clampf(shore_weight * slope_weight * altitude_weight * regional_density, 0.0, 1.0)
+            var path_suppression: float = TerrainPathSampler.get_grass_suppression(world_position)
+            var coverage: float = clampf(shore_weight * slope_weight * altitude_weight * regional_density * (1.0 - path_suppression), 0.0, 1.0)
             _terrain_image.set_pixel(sample_x, sample_z, Color(height, coverage, 0.0, 1.0))
 
     _terrain_texture.update(_terrain_image)
