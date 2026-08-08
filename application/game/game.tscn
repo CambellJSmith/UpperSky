@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=3]
+[gd_scene load_steps=15 format=3]
 
 [ext_resource type="Script" path="res://application/game/game.gd" id="1_game"]
 [ext_resource type="PackedScene" path="res://world/environments/basic_world.tscn" id="2_world"]
@@ -13,6 +13,7 @@
 [ext_resource type="Script" path="res://world/vegetation/dense_ground_cover_streamer.gd" id="11_dense_cover"]
 [ext_resource type="PackedScene" path="res://actors/enemies/straw_dummy/straw_dummy_enemy.tscn" id="12_training_dummy"]
 [ext_resource type="Script" path="res://application/game/training_dummy_placement.gd" id="13_training_dummy_placement"]
+[ext_resource type="Script" path="res://world/dungeons/dungeon_system.gd" id="14_dungeon_system"]
 
 [node name="Game" type="Node3D"]
 script = ExtResource("1_game")
@@ -39,6 +40,9 @@ script = ExtResource("8_starting_inventory")
 
 [node name="TrainingDummyPlacement" type="Node" parent="."]
 script = ExtResource("13_training_dummy_placement")
+
+[node name="DungeonSystem" type="Node3D" parent="."]
+script = ExtResource("14_dungeon_system")
 
 [node name="UnderwaterView" type="CanvasLayer" parent="."]
 script = ExtResource("5_underwater")
