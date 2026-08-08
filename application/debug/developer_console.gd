@@ -5,8 +5,12 @@ const CONSOLE_HEIGHT: float = 320.0 # Defines the fixed upper-screen height occu
 const CONSOLE_LAYER: int = 100 # Keeps developer controls above ordinary game interface layers.
 const TOGGLE_UNICODE_GRAVE: int = 96 # Recognizes the unshifted physical tilde key as a grave accent character.
 const TOGGLE_UNICODE_TILDE: int = 126 # Recognizes the shifted physical tilde character on keyboard layouts that report it directly.
+const VITAL_HEALTH: StringName = &"health" # Identifies health in the shared infinite-vital command implementation without string allocation churn.
+const VITAL_MANA: StringName = &"mana" # Identifies mana in the shared infinite-vital command implementation without string allocation churn.
+const VITAL_STAMINA: StringName = &"stamina" # Identifies stamina in the shared infinite-vital command implementation without string allocation churn.
 
 var _player: FirstPersonPlayer # Stores the active player controlled by developer movement commands.
+var _player_vitals: PlayerVitals # Stores the active player's authoritative resource component controlled by developer vital commands.
 var _day_night_cycle: DayNightCycle # Caches the active world clock resolved through its scene-tree group.
 var _panel: PanelContainer # Owns the visible console surface.
 var _output: RichTextLabel # Displays command history and results.
@@ -22,8 +26,11 @@ func _ready() -> void: # Builds the interface and begins hidden.
     _resolve_day_night_cycle() # Caches the active world clock when already available.
     _set_console_open(false) # Starts with gameplay active.
 
-func initialize(player: FirstPersonPlayer) -> void: # Connects the console to the active player.
+func initialize(player: FirstPersonPlayer) -> void: # Connects the console to the active player and its composed resource model.
     _player = player # Stores the strongly typed player reference.
+    _player_vitals = null # Clears any earlier resource component before resolving the supplied player instance.
+    if _player != null: # Confirms a valid player exists before querying its composed vitals child.
+        _player_vitals = _player.get_node_or_null(NodePath("PlayerVitals")) as PlayerVitals # Resolves authoritative health, mana, and stamina through the existing player composition.
 
 func _input(event: InputEvent) -> void: # Handles console keyboard input before gameplay consumes it.
     if not event is InputEventKey: # Restricts handling to keyboard events.
@@ -131,6 +138,12 @@ func _execute_command(command: String) -> void: # Parses and executes one comple
             _output.clear() # Removes previous lines.
         "fly": # Controls collision-free movement.
             _execute_fly_command(arguments) # Parses optional state and updates the player.
+        "infinite_health": # Controls authoritative developer invulnerability.
+            _execute_infinite_vital_command(arguments, VITAL_HEALTH) # Parses optional state and updates the player's health protection mode.
+        "infinite_mana": # Controls authoritative developer mana protection.
+            _execute_infinite_vital_command(arguments, VITAL_MANA) # Parses optional state and updates the player's mana protection mode.
+        "infinite_stamina": # Controls authoritative developer stamina protection.
+            _execute_infinite_vital_command(arguments, VITAL_STAMINA) # Parses optional state and updates the player's stamina protection mode.
         "time": # Inspects or modifies the world clock.
             _execute_time_command(arguments) # Parses status, speed, or direct-time arguments.
         _: # Handles unregistered commands.
@@ -138,12 +151,15 @@ func _execute_command(command: String) -> void: # Parses and executes one comple
 
 func _write_help() -> void: # Lists supported commands and syntax.
     _write_line("Commands:") # Starts the reference.
-    _write_line("  help                       Show this command list.") # Documents discovery.
-    _write_line("  clear                      Clear console output.") # Documents output clearing.
-    _write_line("  fly [on|off]               Toggle or set fly mode.") # Documents flight control.
-    _write_line("  time                       Show world time and cycle speed.") # Documents clock inspection.
-    _write_line("  time speed <multiplier>    Set cycle speed; 0 pauses, 1 is normal.") # Documents cycle-speed control.
-    _write_line("  time set <hour>            Set time directly using 0-24 hours.") # Documents direct time changes.
+    _write_line("  help                          Show this command list.") # Documents discovery.
+    _write_line("  clear                         Clear console output.") # Documents output clearing.
+    _write_line("  fly [on|off]                  Toggle or set fly mode.") # Documents flight control.
+    _write_line("  infinite_health [on|off]      Toggle or set infinite health.") # Documents developer health protection.
+    _write_line("  infinite_mana [on|off]        Toggle or set infinite mana.") # Documents developer mana protection.
+    _write_line("  infinite_stamina [on|off]     Toggle or set infinite stamina.") # Documents developer stamina protection.
+    _write_line("  time                          Show world time and cycle speed.") # Documents clock inspection.
+    _write_line("  time speed <multiplier>       Set cycle speed; 0 pauses, 1 is normal.") # Documents cycle-speed control.
+    _write_line("  time set <hour>               Set time directly using 0-24 hours.") # Documents direct time changes.
 
 func _execute_fly_command(arguments: PackedStringArray) -> void: # Applies toggle, on, or off semantics to fly mode.
     if _player == null: # Detects a console without an active player.
@@ -164,6 +180,50 @@ func _execute_fly_command(arguments: PackedStringArray) -> void: # Applies toggl
         _write_line("Fly mode enabled. WASD move, Space ascends, Ctrl descends, Shift accelerates.") # Reports controls.
         return # Stops after enabled-state output.
     _write_line("Fly mode disabled.") # Confirms ordinary movement.
+
+func _execute_infinite_vital_command(arguments: PackedStringArray, vital: StringName) -> void: # Applies toggle, on, or off semantics to one authoritative player resource protection mode.
+    if _player_vitals == null: # Detects a console without an active player resource component.
+        _write_line("Infinite vital controls unavailable: no active player vitals.") # Reports the missing dependency.
+        return # Avoids operating on an absent resource model.
+    if arguments.size() > 2: # Rejects extra tokens because every infinite-vital command accepts at most one state argument.
+        _write_infinite_vital_usage(vital) # Reports the command-specific accepted syntax.
+        return # Leaves the current cheat state unchanged.
+    var enabled: bool = not _is_infinite_vital_enabled(vital) # Uses toggle behavior when the developer supplies no explicit state.
+    if arguments.size() == 2: # Detects an explicit on or off request.
+        match arguments[1].to_lower(): # Parses the requested state case-insensitively.
+            "on": # Detects explicit activation.
+                enabled = true # Requests the selected infinite resource mode.
+            "off": # Detects explicit deactivation.
+                enabled = false # Requests ordinary resource behavior for the selected pool.
+            _: # Handles unsupported state tokens.
+                _write_infinite_vital_usage(vital) # Reports the command-specific accepted syntax.
+                return # Leaves the current cheat state unchanged.
+    _set_infinite_vital_enabled(vital, enabled) # Applies the requested mode through PlayerVitals so ordinary gameplay mutation paths respect it.
+    var state_text: String = "enabled" if enabled else "disabled" # Converts the resulting boolean state into concise console output.
+    _write_line("Infinite %s %s." % [String(vital), state_text]) # Confirms which protected resource mode is now active or inactive.
+
+func _is_infinite_vital_enabled(vital: StringName) -> bool: # Reads the selected resource protection state from authoritative PlayerVitals.
+    match vital: # Selects the strongly identified resource without exposing mutable fields.
+        VITAL_HEALTH: # Handles health protection queries.
+            return _player_vitals.is_infinite_health_enabled() # Reports authoritative infinite-health state.
+        VITAL_MANA: # Handles mana protection queries.
+            return _player_vitals.is_infinite_mana_enabled() # Reports authoritative infinite-mana state.
+        VITAL_STAMINA: # Handles stamina protection queries.
+            return _player_vitals.is_infinite_stamina_enabled() # Reports authoritative infinite-stamina state.
+        _: # Handles impossible unsupported identifiers defensively.
+            return false # Defaults invalid resource identifiers to inactive without mutating anything.
+
+func _set_infinite_vital_enabled(vital: StringName, enabled: bool) -> void: # Applies one resource protection state through the authoritative PlayerVitals API.
+    match vital: # Selects the strongly identified resource to mutate.
+        VITAL_HEALTH: # Handles health protection changes.
+            _player_vitals.set_infinite_health_enabled(enabled) # Applies authoritative infinite-health behavior and immediate full-health normalization.
+        VITAL_MANA: # Handles mana protection changes.
+            _player_vitals.set_infinite_mana_enabled(enabled) # Applies authoritative infinite-mana behavior and immediate full-mana normalization.
+        VITAL_STAMINA: # Handles stamina protection changes.
+            _player_vitals.set_infinite_stamina_enabled(enabled) # Applies authoritative infinite-stamina behavior and immediate full-stamina normalization.
+
+func _write_infinite_vital_usage(vital: StringName) -> void: # Reports accepted syntax for one resource-specific infinite command.
+    _write_line("Usage: infinite_%s [on|off]" % String(vital)) # Builds the exact command name from the validated resource identifier.
 
 func _execute_time_command(arguments: PackedStringArray) -> void: # Inspects or modifies the active world clock.
     var cycle: DayNightCycle = _resolve_day_night_cycle() # Resolves the controller lazily.
