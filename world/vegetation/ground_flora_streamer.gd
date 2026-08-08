@@ -155,10 +155,13 @@ func _sample_species(species: int, chunk_origin: Vector2, transforms: Array[Tran
             var candidate := _get_candidate(cell_x, cell_z, cell_size, JITTERS[species], SALTS[species])
             if not _inside_chunk(candidate, chunk_origin):
                 continue
+            var path_suppression: float = TerrainPathSampler.get_grass_suppression(candidate)
+            if path_suppression >= 0.995:
+                continue
             var fertility := _sample_noise(_fertility_noise, candidate)
             var moisture := _sample_noise(_moisture_noise, candidate)
             var patch := _sample_noise(_patch_noise, candidate)
-            var probability := _get_probability(species, fertility, moisture, patch, candidate)
+            var probability: float = _get_probability(species, fertility, moisture, patch, candidate) * (1.0 - path_suppression)
             var roll := _hash01(cell_x, cell_z, SALTS[species] + 11)
             if roll > probability:
                 continue
