@@ -98,8 +98,8 @@ func _carve_room(layout: DungeonLayout, centre: Vector2i) -> void: # Carves one 
         room_width -= 1 # Converts the width to an odd span while preserving the configured upper bound.
     if room_height % 2 == 0: # Detects an even room height for the same centring reason.
         room_height -= 1 # Converts the height to an odd span around the connected anchor cell.
-    var half_width: int = room_width / 2 # Calculates the integer horizontal radius around the selected room centre.
-    var half_height: int = room_height / 2 # Calculates the integer vertical-grid radius around the selected room centre.
+    var half_width: int = room_width >> 1 # Calculates the integer horizontal radius using an exact divide-by-two bit shift on the positive odd span.
+    var half_height: int = room_height >> 1 # Calculates the integer vertical-grid radius without introducing a floating-point division result.
     for offset_y: int in range(-half_height, half_height + 1): # Visits every intended room row around the connected centre.
         for offset_x: int in range(-half_width, half_width + 1): # Visits every intended room column within the current row.
             var cell: Vector2i = centre + Vector2i(offset_x, offset_y) # Converts room-local offsets into a dungeon-grid coordinate.
