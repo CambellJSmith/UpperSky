@@ -1,0 +1,133 @@
+[gd_scene load_steps=16 format=3]
+
+[ext_resource type="Script" path="res://actors/enemies/straw_dummy/straw_dummy_enemy.gd" id="1_dummy"]
+[ext_resource type="Script" path="res://actors/combat/damageable_health.gd" id="2_health"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wood"]
+albedo_color = Color(0.27, 0.135, 0.052, 1)
+roughness = 0.95
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_straw"]
+albedo_color = Color(0.76, 0.57, 0.19, 1)
+roughness = 1.0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_health_background"]
+albedo_color = Color(0.025, 0.025, 0.025, 0.92)
+shading_mode = 0
+billboard_mode = 1
+billboard_keep_scale = true
+no_depth_test = true
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_health_fill"]
+albedo_color = Color(0.18, 0.78, 0.24, 1)
+shading_mode = 0
+billboard_mode = 1
+billboard_keep_scale = true
+no_depth_test = true
+render_priority = 1
+
+[sub_resource type="BoxMesh" id="BoxMesh_post"]
+material = SubResource("StandardMaterial3D_wood")
+size = Vector3(0.18, 2.9, 0.18)
+
+[sub_resource type="BoxMesh" id="BoxMesh_crossbar"]
+material = SubResource("StandardMaterial3D_wood")
+size = Vector3(2.15, 0.16, 0.16)
+
+[sub_resource type="BoxMesh" id="BoxMesh_base"]
+material = SubResource("StandardMaterial3D_wood")
+size = Vector3(1.25, 0.14, 0.2)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_torso"]
+material = SubResource("StandardMaterial3D_straw")
+top_radius = 0.42
+bottom_radius = 0.53
+height = 1.15
+radial_segments = 12
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_arms"]
+material = SubResource("StandardMaterial3D_straw")
+top_radius = 0.12
+bottom_radius = 0.15
+height = 2.0
+radial_segments = 10
+
+[sub_resource type="SphereMesh" id="SphereMesh_head"]
+material = SubResource("StandardMaterial3D_straw")
+radius = 0.36
+height = 0.72
+radial_segments = 12
+rings = 6
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_dummy"]
+radius = 0.58
+height = 2.8
+
+[sub_resource type="QuadMesh" id="QuadMesh_health_background"]
+material = SubResource("StandardMaterial3D_health_background")
+size = Vector2(1.8, 0.2)
+
+[sub_resource type="QuadMesh" id="QuadMesh_health_fill"]
+material = SubResource("StandardMaterial3D_health_fill")
+size = Vector2(1.68, 0.12)
+
+[node name="StrawDummyEnemy" type="Node3D"]
+script = ExtResource("1_dummy")
+
+[node name="Health" type="Node" parent="."]
+script = ExtResource("2_health")
+
+[node name="Body" type="StaticBody3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Body"]
+position = Vector3(0, 1.42, 0)
+shape = SubResource("CapsuleShape3D_dummy")
+
+[node name="Visuals" type="Node3D" parent="."]
+
+[node name="Post" type="MeshInstance3D" parent="Visuals"]
+position = Vector3(0, 1.45, 0.12)
+mesh = SubResource("BoxMesh_post")
+
+[node name="Crossbar" type="MeshInstance3D" parent="Visuals"]
+position = Vector3(0, 2.0, 0.1)
+mesh = SubResource("BoxMesh_crossbar")
+
+[node name="BaseForward" type="MeshInstance3D" parent="Visuals"]
+position = Vector3(0, 0.07, 0)
+mesh = SubResource("BoxMesh_base")
+
+[node name="BaseSide" type="MeshInstance3D" parent="Visuals"]
+position = Vector3(0, 0.07, 0)
+rotation_degrees = Vector3(0, 90, 0)
+mesh = SubResource("BoxMesh_base")
+
+[node name="Torso" type="MeshInstance3D" parent="Visuals"]
+position = Vector3(0, 1.63, 0)
+mesh = SubResource("CylinderMesh_torso")
+
+[node name="StrawArms" type="MeshInstance3D" parent="Visuals"]
+position = Vector3(0, 2.0, 0)
+rotation_degrees = Vector3(0, 0, 90)
+mesh = SubResource("CylinderMesh_arms")
+
+[node name="Head" type="MeshInstance3D" parent="Visuals"]
+position = Vector3(0, 2.48, 0)
+mesh = SubResource("SphereMesh_head")
+
+[node name="HealthBar" type="Node3D" parent="."]
+position = Vector3(0, 3.25, 0)
+
+[node name="Background" type="MeshInstance3D" parent="HealthBar"]
+mesh = SubResource("QuadMesh_health_background")
+
+[node name="Fill" type="MeshInstance3D" parent="HealthBar"]
+position = Vector3(0, 0, 0.002)
+mesh = SubResource("QuadMesh_health_fill")
+
+[node name="HealthText" type="Label3D" parent="HealthBar"]
+position = Vector3(0, 0.26, 0)
+billboard = 1
+font_size = 30
+outline_size = 8
+text = "100 / 100"
