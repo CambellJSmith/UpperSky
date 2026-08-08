@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=14 format=3]
 
 [ext_resource type="Script" path="res://application/game/game.gd" id="1_game"]
 [ext_resource type="PackedScene" path="res://world/environments/basic_world.tscn" id="2_world"]
@@ -11,6 +11,8 @@
 [ext_resource type="Script" path="res://world/decorations/world_decoration_streamer.gd" id="9_decorations"]
 [ext_resource type="Script" path="res://world/vegetation/ground_flora_streamer.gd" id="10_flora"]
 [ext_resource type="Script" path="res://world/vegetation/dense_ground_cover_streamer.gd" id="11_dense_cover"]
+[ext_resource type="PackedScene" path="res://actors/enemies/straw_dummy/straw_dummy_enemy.tscn" id="12_training_dummy"]
+[ext_resource type="Script" path="res://application/game/training_dummy_placement.gd" id="13_training_dummy_placement"]
 
 [node name="Game" type="Node3D"]
 script = ExtResource("1_game")
@@ -20,6 +22,8 @@ script = ExtResource("1_game")
 [node name="DynamicEntities" type="Node3D" parent="."]
 
 [node name="Player" parent="DynamicEntities" instance=ExtResource("3_player")]
+
+[node name="TrainingDummy" parent="DynamicEntities" instance=ExtResource("12_training_dummy")]
 
 [node name="WorldDecorations" type="Node3D" parent="."]
 script = ExtResource("9_decorations")
@@ -32,6 +36,9 @@ script = ExtResource("11_dense_cover")
 
 [node name="StartingInventory" type="Node" parent="."]
 script = ExtResource("8_starting_inventory")
+
+[node name="TrainingDummyPlacement" type="Node" parent="."]
+script = ExtResource("13_training_dummy_placement")
 
 [node name="UnderwaterView" type="CanvasLayer" parent="."]
 script = ExtResource("5_underwater")
