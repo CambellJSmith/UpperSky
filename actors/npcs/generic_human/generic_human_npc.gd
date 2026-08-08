@@ -45,7 +45,9 @@ func _ready() -> void: # Initializes billboard presentation, damageable state, a
 func initialize(player: FirstPersonPlayer, terrain: InfiniteTerrain, random_seed: int) -> void: # Connects the generic human to the active player and terrain after terrain-backed game spawning has completed.
     _player = player # Stores the exact composed player instance that this NPC may detect, chase, and attack.
     _terrain = terrain # Stores the authoritative terrain service used for floating-origin-safe movement checks.
-    _player_vitals = _player.get_node_or_null(NodePath("PlayerVitals")) as PlayerVitals if _player != null else null # Resolves player health through the existing child component rather than introducing a second combat resource model.
+    _player_vitals = null # Clears any earlier player-health reference before resolving the supplied composed player instance.
+    if _player != null: # Confirms a valid player exists before querying its authoritative vitals child.
+        _player_vitals = _player.get_node_or_null(NodePath("PlayerVitals")) as PlayerVitals # Resolves player health through the existing child component rather than introducing a second combat resource model.
     _rng.seed = random_seed # Seeds wandering from stable composition data so this NPC's initial movement is reproducible for the same spawn.
     if _terrain != null: # Confirms stable world-coordinate conversion is available before recording the wander origin.
         var home_world_position: Vector3 = _terrain.local_to_world_position(global_position) # Converts the current near-origin scene position into floating-origin-independent procedural world space.
@@ -127,7 +129,7 @@ func _apply_gravity(delta: float) -> void: # Applies ordinary project gravity on
         if velocity.y < 0.0: # Detects residual downward velocity that should be cleared after landing.
             velocity.y = 0.0 # Removes accumulated fall velocity so grounded walking remains stable on terrain.
         return # Skips gravity while the NPC is already supported by a floor surface.
-    var gravity: Vector3 = get_gravity() # Reads Godot's configured three-dimensional project gravity vector instead of duplicating project settings.
+    var gravity: Vector3 = get_gravity() # Reads the project-configured gravity vector provided by the shared billboard NPC base class.
     velocity += gravity * delta # Integrates gravity into the current velocity for this physics step.
 
 func _choose_new_wander_direction() -> void: # Selects one bounded random ambient movement segment from the NPC's isolated random stream.
