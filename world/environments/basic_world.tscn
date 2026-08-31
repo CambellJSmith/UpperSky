@@ -21,14 +21,18 @@ ambient_light_energy = 0.5
 reflected_light_source = 2
 tonemap_mode = 2
 fog_enabled = true
+fog_mode = 1
 fog_light_color = Color(0.62, 0.71, 0.8, 1)
 fog_light_energy = 0.58
-fog_density = 0.00052
-fog_aerial_perspective = 0.68
+fog_density = 1.0
+fog_depth_begin = 96.0
+fog_depth_end = 640.0
+fog_depth_curve = 1.35
+fog_aerial_perspective = 0.0
 fog_sun_scatter = 0.08
 fog_height = 320.0
-fog_height_density = 0.00065
-fog_sky_affect = 0.48
+fog_height_density = 0.0
+fog_sky_affect = 1.0
 
 [node name="BasicWorld" type="Node3D"]
 script = ExtResource("2_cycle")
@@ -41,7 +45,7 @@ rotation_degrees = Vector3(-52, -32, 0)
 light_color = Color(1, 0.92, 0.8, 1)
 light_energy = 1.2
 shadow_enabled = true
-directional_shadow_max_distance = 1600.0
+directional_shadow_max_distance = 700.0
 
 [node name="Moon" type="DirectionalLight3D" parent="."]
 rotation_degrees = Vector3(128, 148, 0)
