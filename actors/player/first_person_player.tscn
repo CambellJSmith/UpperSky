@@ -34,7 +34,7 @@ position = Vector3(0, 1.65, 0)
 [node name="Camera3D" type="Camera3D" parent="Head"]
 current = true
 near = 0.05
-far = 16000.0
+far = 768.0
 
 [node name="EquipmentMount" type="Node3D" parent="Head/Camera3D"]
 position = Vector3(0.38, -0.34, -1.1)
