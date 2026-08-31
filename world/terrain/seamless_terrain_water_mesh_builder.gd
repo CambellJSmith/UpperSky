@@ -46,8 +46,8 @@ func build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh: # Generates one 
             var water_top_right: Vector3 = Vector3(local_right, water_height_cache[top_right_index], local_back) # Builds the continuous water surface at the shared back-right grid vertex.
             var water_bottom_left: Vector3 = Vector3(local_left, water_height_cache[bottom_left_index], local_forward) # Builds the continuous water surface at the shared forward-left grid vertex.
             var water_bottom_right: Vector3 = Vector3(local_right, water_height_cache[bottom_right_index], local_forward) # Builds the continuous water surface at the shared forward-right grid vertex.
-            _append_clipped_surface_triangle(terrain_top_left, terrain_top_right, terrain_bottom_left, water_top_left, water_top_right, water_bottom_left, chunk_world_x, chunk_world_z, vertices, normals, uvs) # Clips the first cell triangle against terrain while retaining the exact shared water surface.
-            _append_clipped_surface_triangle(terrain_top_right, terrain_bottom_right, terrain_bottom_left, water_top_right, water_bottom_right, water_bottom_left, chunk_world_x, chunk_world_z, vertices, normals, uvs) # Clips the second cell triangle using the same diagonal as terrain and gameplay interpolation.
+            _append_clipped_seamless_surface_triangle(terrain_top_left, terrain_top_right, terrain_bottom_left, water_top_left, water_top_right, water_bottom_left, chunk_world_x, chunk_world_z, vertices, normals, uvs) # Clips the first cell triangle against terrain while retaining the exact shared water surface.
+            _append_clipped_seamless_surface_triangle(terrain_top_right, terrain_bottom_right, terrain_bottom_left, water_top_right, water_bottom_right, water_bottom_left, chunk_world_x, chunk_world_z, vertices, normals, uvs) # Clips the second cell triangle using the same diagonal as terrain and gameplay interpolation.
     var water_mesh: ArrayMesh = ArrayMesh.new() # Creates a valid empty return mesh even when the complete chunk is dry.
     if vertices.is_empty(): # Detects a chunk with no terrain lying below the continuous water surface.
         return water_mesh # Returns the empty mesh so the terrain chunk can omit its water renderer.
@@ -60,7 +60,7 @@ func build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh: # Generates one 
     water_mesh.surface_set_material(0, _water_material) # Applies the established shared transparent water material to the seamless surface.
     return water_mesh # Returns the completed water mesh containing no vertical transition curtains or side faces.
 
-func _append_clipped_surface_triangle(terrain_a: Vector3, terrain_b: Vector3, terrain_c: Vector3, water_a: Vector3, water_b: Vector3, water_c: Vector3, chunk_world_x: float, chunk_world_z: float, vertices: Array[Vector3], normals: Array[Vector3], uvs: Array[Vector2]) -> void: # Clips one sloped water triangle against the corresponding linearly interpolated terrain triangle.
+func _append_clipped_seamless_surface_triangle(terrain_a: Vector3, terrain_b: Vector3, terrain_c: Vector3, water_a: Vector3, water_b: Vector3, water_c: Vector3, chunk_world_x: float, chunk_world_z: float, vertices: Array[Vector3], normals: Array[Vector3], uvs: Array[Vector2]) -> void: # Clips one sloped water triangle against the corresponding linearly interpolated terrain triangle.
     var terrain_points: Array[Vector3] = [terrain_a, terrain_b, terrain_c] # Stores terrain vertices in the exact triangle order shared by ground rendering.
     var water_points: Array[Vector3] = [water_a, water_b, water_c] # Stores corresponding continuous water vertices in the same horizontal positions.
     var signed_depths: Array[float] = [] # Stores water-minus-terrain clearance after shoreline tolerance at each triangle vertex.
