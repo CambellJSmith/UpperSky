@@ -46,7 +46,30 @@ func _refresh_points() -> void:
 				if door is DungeonDoor:
 					var world := terrain.local_to_world_position(door.global_position)
 					_append_point("cave:%s" % door.get_path(), "cave", "▣", world, origin, next)
+	_append_logical_points(origin, next)
 	_points = next
+
+func _append_logical_points(origin: Vector2, output: Array[Dictionary]) -> void:
+	# Keep exploration guidance useful before the corresponding world chunks stream in.
+	# These are deterministic candidate coordinates; streamed POIs replace them when found.
+	var candidates := [
+		{"id": "logical:camp:nw", "kind": "camp", "icon": "⛺", "offset": Vector2(-920, -560)},
+		{"id": "logical:town:e", "kind": "town", "icon": "⌂", "offset": Vector2(1080, 180)},
+		{"id": "logical:home:sw", "kind": "home", "icon": "⌂", "offset": Vector2(-760, 820)},
+		{"id": "logical:cave:n", "kind": "cave", "icon": "▣", "offset": Vector2(120, -1280)},
+		{"id": "logical:camp:se", "kind": "camp", "icon": "⛺", "offset": Vector2(980, 760)},
+		{"id": "logical:town:w", "kind": "town", "icon": "⌂", "offset": Vector2(-1320, 80)}
+	]
+	for candidate in candidates:
+		if output.size() >= 5: return
+		if _discovered.has(candidate.id): continue
+		var duplicate := false
+		for existing in output:
+			if existing.offset.distance_to(candidate.offset) < 140.0:
+				duplicate = true
+				break
+		if not duplicate:
+			output.append(candidate)
 
 func _collect_cells(owner: Node, property_name: String, kind: String, icon: String, origin: Vector2, output: Array[Dictionary]) -> void:
 	if not is_instance_valid(owner): return
