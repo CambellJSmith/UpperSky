@@ -12,19 +12,21 @@ UpperSky currently combines these playable systems:
 
 - Infinite deterministic terrain with streamed collision, water and floating-origin rebasing.
 - First-person walking, sprinting, jumping, climbing and swimming.
-- Health, stamina and mana resources with an in-game status HUD.
+- Concentric health, stamina, mana and experience rings, with delayed health regeneration.
 - A categorized, weight-limited inventory and first-person equipment system.
 - Seventeen melee weapons/tools with distinct damage, reach, cooldowns and attack motions.
 - First-person arms that grip and animate equipped weapons.
 - Shared player/NPC health and melee combat.
 - Armed and unarmed NPC combat driven by an affection/hostility system.
 - Lootable chests and defeated NPC inventories.
-- Procedural camps, medieval houses, homesteads, towns, roads and wilderness paths.
+- Procedural camps, medieval homes, towns, fortified city entrances, terrain-aware roads and bridges.
 - Procedural cliff entrances and deterministic cave-dungeon interiors.
-- Human, orc, demon, ghost, zombie and fish-man NPC populations.
+- Peasants, orcs, wizards, knights, kings, Shadow Sentinels, demons, ghosts, zombies and fish-men, plus night-transforming werewolves and vampires.
 - Discoverable wayshrines with fast travel between activated shrines.
-- A day/night cycle and biome-specific world features.
+- A day/night cycle, night-only encounters, biome-specific scenery and automated shore ferries.
 - Automatic saving, quick save/load and persistent world/NPC state.
+- Enterable building rooms and separate city/cave spaces with loading screens.
+- A heading compass for nearby points of interest, with provisional fallback markers.
 - A developer console, runtime profiler and generation diagnostics.
 
 UpperSky is still a development project rather than a finished, content-complete RPG. The current focus is the systemic world, exploration, combat, persistence and streaming foundation.
@@ -47,6 +49,8 @@ The procedural world contains several large-scale biome types with their own ter
 - **River Valleys** — broad river channels with waterfall and foam features.
 - **Volcanic Islands** — volcanic terrain with crater lava, glow and smoke effects.
 
+Water surfaces are flat, horizontal planes. Seas, lakes and river reaches use fixed levels, with waterfalls between river elevations; rendering, swimming and ferry placement share these levels.
+
 Water is part of traversal rather than just scenery. Entering sufficiently deep water switches the player into swimming movement and applies an underwater view effect. Volcanic lava is currently a visual world feature rather than a player damage system.
 
 ### Day And Night
@@ -55,7 +59,9 @@ The overworld has a continuous day/night cycle with sun, moon, sky, fog and envi
 
 ### Vegetation And Scenery
 
-The world streams low-poly trees, rocks, shrubs, flora and dense ground cover around the player. Placement systems share reservations with roads, settlements, camps and other generated structures so vegetation does not simply ignore occupied world space.
+The world streams varied low-poly trees, closely fitted boulder collision, shrubs, flora and dense ground cover around the player. Placement shares reservations with roads, settlements, camps and other structures.
+
+Grass combines nearby instanced blade meshes with distant shading in the existing terrain material. Density drops at 42 and 65 metres; blades shorten and disappear by 95 metres as ground shading takes over. Both representations use shared road, shoreline, biome and clearing masks and stable world coordinates. This reduces distant geometry without an extra terrain render pass; performance still depends on the scene and hardware.
 
 ### Camps
 
@@ -67,13 +73,29 @@ Looking at a camp bedroll and interacting with it allows the player to rest for 
 
 Settlements are placed directly into the procedural terrain rather than existing as fixed authored maps.
 
-Rare homesteads use small single-storey cottages. Larger towns contain 8–16 houses arranged around connected streets, a central square and a well. Procedural house styles include cottages, long halls, winged houses, jettied upper floors and towers, with combinations of stone, brick, wood, timber framing, slate and thatch.
+Isolated homesteads use small single-storey cottages on suitable flat ground. Each 384-metre cell has a 55% chance to attempt a home; every 1536-metre region attempts a town or city, with unsuitable sites rejected. Larger towns contain 8–16 houses arranged around connected streets, a central square and a well. Procedural house styles include cottages, long halls, winged houses, jettied upper floors and towers, with combinations of stone, brick, wood, timber framing, slate and thatch.
 
-Doors face the generated street network, short paths connect buildings to roads, and placement rejects unsuitable water, slope, camp and overlap conditions. Houses are currently solid exterior structures; the procedural settlement system does not provide enterable house interiors.
+Doors face the generated street network, short paths connect buildings to roads, and placement rejects unsuitable water, slope, camp and overlap conditions. Interact with a building entrance to enter its separate interior room. Rooms currently provide empty spaces sized to their exterior; furnished interiors and detailed indoor activities remain future work. Loading screens cover entry and exit.
 
 ### Roads And Paths
 
-A shared path network provides wilderness roads, settlement streets, door paths and dry connections between generated settlements. The same network is used by terrain/path rendering and by NPC route systems, allowing residents and travellers to move through the world using the generated geography.
+A shared terrain-aware network connects population centres, city gates and isolated homes, together with town streets and door paths. Routes sample ground heights, avoid cliffs, water, lava and structures, and can cross short rivers or ravines on low-poly wooden bridges. Visible paths conform to terrain; NPC routes and vegetation clearing use the same network.
+
+Road planning runs in bounded background jobs and caches completed plans between sessions. Local streets appear independently of unfinished regional searches. Broad seas and impassable terrain can leave settlements disconnected.
+
+### Fortified Cities
+
+One third of valid settlement seeds become city entrances. Their exterior has tall stone walls, towers, gates, a moat and drawbridge. Crossing the drawbridge enters a separate city space with 52 varied medieval houses, 52 peasant residents, streets, a market square and castle.
+
+Each castle has exactly **one Crimson King and one Shadow Sentinel**, with six knights patrolling the courtyard and streets. Their health, affection, belongings and positions persist across visits and saves. City scenery is batched by material and neighbourhood; construction happens across frames while the loading screen remains visible. The city gate returns to the overworld, and city houses have their own interior rooms.
+
+### Docks And Boats
+
+Wooden docks appear in suitable shallow-gradient shore locations with a checked crossing to another bank. Dock pairs are spaced apart and reject intersecting lanes, shoals, waterfalls, lava and unsafe approaches.
+
+Each bank maintains three waiting boats. Interact at a dock to board immediately; the boat sails automatically and places the passenger on the opposite dock. Player and NPC boats can travel independently in both directions. Saving aboard records a safe departure dock.
+
+Where both banks have validated settlement connections, travelling NPCs walk from their home settlement, cross by boat and continue to another town or city gate. Following them leads toward a settlement. City travellers currently stop at the exterior approach rather than entering the separate city space.
 
 ## Dungeons
 
@@ -83,7 +105,7 @@ Dungeon identity, topology and entrance pairing are deterministic. Interior door
 
 Cave interiors have collidable floors, walls and ceilings, their own environment, and cave-specific NPC population. Ghosts and zombies can populate connected floor cells away from entrance doors. The active cave identity and player position inside it are preserved by the save system.
 
-A starting cave pair is generated as part of a new game's initial world setup.
+A starting cave pair is generated as part of a new game's initial world setup. Loading screens cover initial loading, cave entry/exit and saved-space restoration until destination geometry and collision are ready.
 
 ## Player
 
@@ -109,7 +131,15 @@ The player owns three persistent resource pools:
 - **Stamina** — consumed by sprinting, jumping, climbing and swimming. Maximum stamina also defines inventory carrying capacity.
 - **Mana** — represented by the current player-resource and HUD/save systems for future gameplay use.
 
-Health uses the same underlying health model as NPCs.
+Health uses the same underlying health model as NPCs. After three seconds without damage, a living player regenerates two health per second.
+
+Health, stamina and mana appear as clockwise concentric rings in the top right. A white centre ring tracks experience, capped at 100; it stays full when filled and does not currently trigger an automatic level-up. NPC defeats and certain loot transfers award experience. Loot rewards currently use item-weight thresholds as a proxy rather than a full economic value system.
+
+### Compass
+
+A heading-relative compass shows cardinal directions and nearby undiscovered camps, homes, towns, cities and caves. Inside cities it marks the castle, gate, square and nearby houses. Only forward-facing bearings are drawn in the visible bar.
+
+The current overworld fallback pads the list to at least five entries using provisional directional markers; these do not yet locate verified, unstreamed POIs. Treat fallback icons as unfinished exploration guidance.
 
 ## Inventory And Equipment
 
@@ -147,25 +177,31 @@ Equipment can be selected from the inventory, with number keys `1`–`9`, or by 
 
 ### Population
 
-The current character roster includes:
+The current roster has thirteen models: Humble Pilgrim, Village Weaver, Orc Warlord, demon, ghost, zombie, Tidefin Sentinel fish-man, travelling wizard, werewolf, knight, vampire, Crimson King and Shadow Sentinel.
 
-- Humble Pilgrim
-- Village Weaver
-- Orc Warlord
-- Demon
-- Ghost
-- Zombie
-- Tidefin Sentinel fish-man
+Towns provide six civilian residents and two guards; isolated homes have a resident. City residents, king, shadow person and guards stay in their own city space. Road travellers include peasants, orcs, wizards and knights in groups of 3–5, travelling between real settlements and pausing on arrival before returning. Traffic adds new deterministic party identities every three minutes, targeting regular encounters near loaded roads rather than guaranteeing a sighting regardless of terrain or visibility. The wilderness villager population is capped at 72, with separate resident and traveller allowances so traffic cannot crowd out townspeople.
 
-Humans and orcs can appear as residents, homesteaders and wilderness travellers. Demons are streamed around suitable volcanic areas. Ghosts and zombies populate cave dungeons. Fish-men patrol dry routes close to water.
+Demons patrol suitable volcanic ground, zombies and ghosts inhabit caves, and fish-men patrol near water. Up to eight additional ghosts roam the overworld at night and fade out at sunrise. Eligible travelling human peasants have a 1-in-50 chance of being a werewolf and a separate, mutually exclusive 1-in-50 chance of being a vampire. They transform during the shared 18:00–06:00 night window, become hostile at affection 0, and restore their daytime form and affection after sunrise.
 
-NPC population is streamed around the player and rebuilt deterministically when areas are revisited. Persistent records retain important state such as health, affection, death state, corpse location and belongings.
+Models retain their supplied rigs and textures. Shared offline-baked quaternion animation libraries provide idle, walk, run, punches, kick and weapon motions. Quaternius supplies locomotion and punches; the kick and weapon attacks are complementary authored animations.
 
 ### Affection And Hostility
 
-NPC combat is controlled by affection. NPCs at affection `10` or below become hostile; raising affection above that threshold cancels active combat. Species can begin with different affection levels, so some populations are naturally friendly while others are hostile on encounter.
+Affection ranges from **0** (hate) through **100** (neutral) to **200** (adoration). Starting player scores are:
 
-Hostile NPCs acquire nearby living players with line of sight, pursue on safe terrain and disengage when the target escapes their pursuit range. Cave pursuit uses connected dungeon floor cells, while overworld pursuit uses dry-ground routing and physics collision. NPC movement avoids water, lava and unsafe slopes.
+| NPC | Affection |
+| --- | ---: |
+| Humans, wizards, kings, Shadow Sentinels | 100 |
+| Orcs | 50 |
+| Ghosts | 25 |
+| Knights | 11 |
+| Demons, zombies, fish-men, werewolf/vampire forms | 0 |
+
+When two living NPCs first come within 50 metres in the same world space, each receives its own directed score toward the other: its species' player starting score, plus 50 for matching species, capped at 200. These relationships are decided once and saved. Peasants, wizards, knights and kings count as human for the matching-species bonus.
+
+Every point of actual damage removes one affection point from the victim toward the attacker, including NPC-on-NPC hits. Combat selects the lowest-affection eligible living target with line of sight in the same space. Scores of 10 or below enable hostility; an NPC that has caused damage can also become a retaliation target above 10 when its score falls below the victim's score toward the player. Target selection runs within 24 metres and pursuit ends beyond 36 metres.
+
+NPC movement uses checked terrain routes and collision, avoiding water, lava and unsafe slopes. Saved records retain wounds, relationships, deaths, positions, journeys and belongings across streaming and sessions.
 
 ### Combat
 
@@ -173,7 +209,9 @@ NPCs use the same equipment catalogue as the player when armed. An armed NPC cho
 
 Unarmed NPCs use a sequence of punches and kicks. Combat hits are checked at impact time for range, line of sight and a living target.
 
-Player melee attacks damage NPCs through the shared health system. At zero health, a character stops normal movement, enters a corpse state and becomes lootable. Wounds, deaths and changed corpse inventories survive streaming and saved games.
+Unarmed wizards cast visible travelling fireballs. Projectiles hit the first wall or character, including other NPCs, and attribute damage to their caster, allowing accidental hits to provoke retaliation. Armed wizards use their weapon instead.
+
+Player melee attacks damage NPCs through the shared health system. At zero health, a character stops normal movement, enters a physical skeletal ragdoll state and becomes lootable. Wounds, deaths and changed corpse inventories survive streaming and saved games. Corpse physics includes a skeletal simulation, interaction dragging and water-current handling. This system remains experimental: the current grab releases when Interact is released, and stable full-body dragging and flotation need further validation.
 
 ## Loot
 
@@ -204,7 +242,7 @@ The game:
 - Keeps a verified backup of the previous save when replacing a slot.
 - Validates save structure and values before restoring runtime state.
 
-Saved state includes the player's absolute overworld/cave location, view orientation, inventory, equipped item, health, stamina, mana, world time, NPC wounds/deaths/affection/belongings, changed loot containers, activated wayshrines and deterministic cave-pair information.
+Saved state includes the player's absolute overworld location or active cave/city/building space, view orientation, inventory, equipped item, health, stamina, mana, experience, world time, NPC wounds/deaths/relationships/belongings and journey state, changed loot containers, activated wayshrines and deterministic cave-pair information.
 
 Terrain, settlements and other deterministic generated structures are reconstructed from the stored world seed instead of being serialized as scene geometry.
 
@@ -259,6 +297,7 @@ infinite_mana [on|off]
 
 biome <ice|river|volcanic>
 town
+city
 homestead
 houses [seed|clear]
 npc <punch|kick>
@@ -275,7 +314,7 @@ profile export
 profile folder
 ```
 
-The `biome`, `town`, `homestead` and `houses` commands are development navigation/preview tools; they are not ordinary player fast-travel systems.
+The `biome`, `town`, `city`, `homestead` and `houses` commands are development navigation/preview tools. To investigate performance, run `profile start`, play through slow areas, then run `profile export` and share the resulting JSON. Reports include frame-time percentiles, spikes, scoped CPU timings, streaming queues, counters and markers. Main-thread scopes and overlapping worker durations are reported separately; the scheduler uses a soft frame budget rather than a strict frame-time guarantee.
 
 ## Running The Project
 
@@ -333,7 +372,7 @@ world/
   environments/    World environment and day/night cycle
   houses/          Procedural medieval house generation
   paths/           Shared road and path network
-  settlements/     Homestead and town generation
+  settlements/     Homesteads, towns and isolated city spaces
   terrain/         Infinite terrain, water and mesh generation
   trees/           Procedural low-poly tree generation
   vegetation/      Flora and dense ground-cover streaming
@@ -368,6 +407,10 @@ godot --headless --path . --script application/save/tests/check_save.gd
 godot --headless --path . --script application/streaming/tests/check_generation.gd
 godot --headless --path . --script actors/combat/tests/check_health.gd
 godot --headless --path . --script actors/combat/tests/check_npc_combat.gd
+godot --headless --path . --script actors/combat/tests/check_npc_grudges.gd
+godot --headless --path . --script world/settlements/tests/check_city.gd
+godot --headless --path . --script world/paths/tests/check_ferries.gd
+godot --headless --path . --script application/debug/tests/check_profiler_threads.gd
 godot --headless --path . --script items/loot/tests/check_loot.gd
 godot --headless --path . --script world/wayshrines/tests/check_wayshrines.gd
 ```
@@ -379,12 +422,3 @@ See each subsystem README for the checks relevant to that system.
 UpperSky is licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE).
 
 Some bundled third-party assets have their own attribution/license information alongside the relevant source files; for example, NPC animation sources include the Quaternius license under `actors/npcs/villagers/animations/`.
-## Current world streaming details
-
-The biome art uses flat face lighting, a restrained palette, bevelled faceted ice, polygonal volcanic slopes, cracked lava plates, and soft low-poly smoke. Water surfaces are horizontal planes with subtle animated colour ripples. Geological lakes use fixed elevation bands; biome seas and river reaches use fixed regional levels without blending water uphill. Waterfalls connect the separate river elevations using vertical flowing ribbons, polygon rock clusters, and a spreading foam pool. Rendering, swimming and boats share the same water levels and shoreline clipping. Road and ferry caches are versioned when this water layout changes.
-
-World roads now connect towns, city gates and isolated homes using terrain-aware routes rather than repeated wilderness curves. They avoid cliffs and obstacles, cross rivers and narrow ravines on walkable low-poly bridges, and share their geometry with village streets, vegetation clearing and road travellers. Road searches run in background workers and completed plans are cached between sessions. See `world/paths/README.md` for generation, streaming and checks.
-
-Dense grass combines nearby blade meshes with distant grass shading in the terrain's existing material. Shared 56/28/7-blade meshes use 100/50/25 clumps per tile, with density transitions at 42 and 65 metres and hidden tiles beyond 95 metres. Blades gradually shorten from 60 to 95 metres while ground shading blends in from 42 to 80 metres, preserving the low-poly terrain faces. Both use the same local road, shore, biome and clearing masks; farther ground shading follows terrain colours. World-space patches remain stable across floating-origin shifts, and fine detail fades before it can shimmer. Five-metre density hysteresis prevents repeated switching. This reduces distant blade geometry without adding another terrain render pass; actual frame-rate gains depend on the scene and hardware.
-
-Each city castle has exactly one Crimson King and one Shadow Sentinel. Both use the shared NPC health, inventory, affection, animation and save systems; the Shadow Sentinel starts at neutral affection 100.
