@@ -102,18 +102,19 @@ class CompassBar extends Control:
 		var font := ThemeDB.fallback_font
 		for i in range(-12, 13):
 			var angle := float(i) * PI / 12.0
-			var x := centre + sin(angle) * BAR_WIDTH * 0.5
+			var x := centre + angle / PI * BAR_WIDTH * 0.5
 			draw_line(Vector2(x, 38), Vector2(x, 46 if i % 3 else 31), Color(0.8, 0.84, 0.78, 0.75), 1.0)
 		var labels := ["N", "E", "S", "W"]
 		for i in range(4):
 			var relative := wrapf(float(i) * PI * 0.5 + heading, -PI, PI)
-			var x := centre + sin(relative) * BAR_WIDTH * 0.5
+			var x := centre + relative / PI * BAR_WIDTH * 0.5
 			if x > centre - BAR_WIDTH * 0.45 and x < centre + BAR_WIDTH * 0.45:
 				draw_string(font, Vector2(x - 5, 22), labels[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1, 0.88, 0.55))
 		for point in points:
 			var offset: Vector2 = point.offset
 			var angle := atan2(offset.x, -offset.y) + heading
-			var x := centre + sin(angle) * BAR_WIDTH * 0.45
+			var relative := wrapf(angle, -PI, PI)
+			var x := centre + relative / PI * BAR_WIDTH * 0.45
 			if x < centre - BAR_WIDTH * 0.47 or x > centre + BAR_WIDTH * 0.47: continue
 			draw_string(font, Vector2(x - 7, 48), point.icon, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.92, 0.82))
 
