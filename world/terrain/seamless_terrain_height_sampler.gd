@@ -3,3 +3,6 @@ class_name SeamlessTerrainHeightSampler # Supplies terrain heights shaped agains
 
 func _get_local_water_level(regional_height: float) -> float: # Replaces hard water-tier selection with the shared continuous geological water profile.
     return TerrainWaterProfile.get_continuous_level(regional_height) # Keeps coast grading and underwater shaping synchronized with the seamless rendered water surface.
+
+func sample_height(world_x: float, world_z: float) -> float:
+    return BiomeProfile.height(Vector2(world_x, world_z), super.sample_height(world_x, world_z))

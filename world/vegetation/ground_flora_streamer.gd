@@ -14,8 +14,8 @@ const SLOPE_SAMPLE_DISTANCE := 4.0
 enum Species { GRASS, SHRUB, FERN, REED, FLOWER }
 
 const SPECIES_NAMES := ["Grass", "Shrubs", "Ferns", "Reeds", "Wildflowers"]
-const CELL_SIZES := [7.25, 25.0, 16.0, 10.5, 14.5]
-const VISIBILITY_RANGES := [0.0, 720.0, 560.0, 560.0, 480.0]
+const CELL_SIZES := [4.8, 13.0, 16.0, 10.5, 14.5]
+const VISIBILITY_RANGES := [310.0, 720.0, 560.0, 560.0, 480.0]
 const SLOPE_LIMITS := [3.8, 5.4, 4.4, 3.0, 3.1]
 const ALTITUDE_FADE_STARTS := [1500.0, 1200.0, 1050.0, 1450.0, 1250.0]
 const ALTITUDE_FADE_ENDS := [2750.0, 2150.0, 1900.0, 2250.0, 2200.0]
@@ -30,6 +30,8 @@ const FLOWER_COLORS := [
     Color(0.35, 0.53, 0.77),
 ]
 
+var _settlement_sampler: SettlementSampler
+var _camp_sampler: CampSampler
 var _terrain: InfiniteTerrain
 var _player: Node3D
 var _water_sampler: TerrainWaterLevelSampler
@@ -41,6 +43,7 @@ var _flower_noise: FastNoiseLite
 var _meshes: Array[Mesh] = []
 var _chunks: Dictionary[Vector2i, Node3D] = {}
 var _desired_chunks: Dictionary[Vector2i, bool] = {}
+var _building: Dictionary = {}
 var _pending_chunks: Array[Vector2i] = []
 var _pending_index := 0
 var _current_chunk := INVALID_CHUNK
@@ -53,10 +56,21 @@ func _ready() -> void:
     var player_node := get_node_or_null("../DynamicEntities/Player")
     if terrain_node is InfiniteTerrain:
         _terrain = terrain_node
+        _settlement_sampler = SettlementSampler.for_terrain(_terrain)
+        _camp_sampler = CampSampler.new(_terrain)
     if player_node is Node3D:
         _player = player_node
 
 func _process(delta: float) -> void:
+    # Timing scopes are inactive until a console recording begins.
+    if not RuntimeProfiler.recording:
+        _profile__process(delta)
+        return
+    var _profile_token = RuntimeProfiler.begin("flora.stream")
+    _profile__process(delta)
+    RuntimeProfiler.end(_profile_token)
+
+func _profile__process(delta: float) -> void:
     if not _initialized:
         _try_initialize()
         return
@@ -77,7 +91,7 @@ func _try_initialize() -> void:
         return
     if _terrain.get_loaded_chunk_count() <= 0 or not _player.is_physics_processing():
         return
-    _water_sampler = TerrainWaterLevelSampler.new()
+    _water_sampler = SeamlessTerrainWaterLevelSampler.new()
     _fertility_noise = _create_noise(601, 0.00085, 3, 0.54)
     _moisture_noise = _create_noise(617, 0.00145, 3, 0.52)
     _patch_noise = _create_noise(641, 0.0075, 2, 0.48)
@@ -117,27 +131,35 @@ func _build_initial_area(centre: Vector2i) -> void:
         for x in range(-INITIAL_BUILD_RADIUS, INITIAL_BUILD_RADIUS + 1):
             var coordinate := centre + Vector2i(x, z)
             if not _chunks.has(coordinate):
-                _build_chunk(coordinate)
+                _queue_incremental(coordinate)
 
 func _build_pending_chunks() -> void:
+    if not _building.is_empty(): return
     var built := 0
     while built < CHUNKS_BUILT_PER_FRAME and _pending_index < _pending_chunks.size():
         var coordinate := _pending_chunks[_pending_index]
         _pending_index += 1
         if not _desired_chunks.has(coordinate) or _chunks.has(coordinate):
             continue
-        _build_chunk(coordinate)
+        _queue_incremental(coordinate)
         built += 1
 
 func _build_chunk(coordinate: Vector2i) -> void:
+    # Timing scopes are inactive until a console recording begins.
+    if not RuntimeProfiler.recording:
+        _profile__build_chunk(coordinate)
+        return
+    var _profile_token = RuntimeProfiler.begin("flora.build_chunk")
+    _profile__build_chunk(coordinate)
+    RuntimeProfiler.end(_profile_token)
+
+func _profile__build_chunk(coordinate: Vector2i) -> void:
     var origin := Vector2(float(coordinate.x), float(coordinate.y)) * TerrainConfiguration.CHUNK_SIZE
     var chunk := Node3D.new()
     chunk.name = "GroundFloraChunk_%d_%d" % [coordinate.x, coordinate.y]
     chunk.position = _get_chunk_local_position(coordinate)
     add_child(chunk)
     for species in range(SPECIES_NAMES.size()):
-        if species == Species.GRASS:
-            continue
         var transforms: Array[Transform3D] = []
         var colours: Array[Color] = []
         _sample_species(species, origin, transforms, colours)
@@ -153,9 +175,11 @@ func _sample_species(species: int, chunk_origin: Vector2, transforms: Array[Tran
     for cell_z in range(min_z, max_z + 1):
         for cell_x in range(min_x, max_x + 1):
             var candidate := _get_candidate(cell_x, cell_z, cell_size, JITTERS[species], SALTS[species])
-            if not _inside_chunk(candidate, chunk_origin):
+            if not _inside_chunk(candidate, chunk_origin) or _camp_sampler.is_clearing(candidate) or _settlement_sampler.is_clearing(candidate) or WayshrineSampler.for_terrain(_terrain).is_clearing(candidate):
                 continue
-            var path_suppression: float = TerrainPathSampler.get_grass_suppression(candidate)
+            if BiomeProfile.vegetation_weight(candidate) < 0.5:
+                continue
+            var path_suppression: float = TerrainPathSampler.get_grass_suppression(candidate,_terrain)
             if path_suppression >= 0.995:
                 continue
             var fertility := _sample_noise(_fertility_noise, candidate)
@@ -165,7 +189,7 @@ func _sample_species(species: int, chunk_origin: Vector2, transforms: Array[Tran
             var roll := _hash01(cell_x, cell_z, SALTS[species] + 11)
             if roll > probability:
                 continue
-            var height := _terrain.get_height_at(candidate)
+            var height := _camp_sampler.ground_height(candidate)
             var altitude_weight := 1.0 - smoothstep(ALTITUDE_FADE_STARTS[species], ALTITUDE_FADE_ENDS[species], height)
             if roll > probability * altitude_weight:
                 continue
@@ -184,9 +208,9 @@ func _sample_species(species: int, chunk_origin: Vector2, transforms: Array[Tran
 func _get_probability(species: int, fertility: float, moisture: float, patch: float, position: Vector2) -> float:
     match species:
         Species.GRASS:
-            return 0.0
+            return .15 + smoothstep(.32,.72,patch) * lerpf(.30,.72,fertility)
         Species.SHRUB:
-            return 0.06 + smoothstep(0.30, 0.78, fertility) * lerpf(0.45, 1.0, patch) * 0.48
+            return 0.12 + smoothstep(0.30, 0.78, fertility) * lerpf(0.30, 1.0, patch) * 0.58
         Species.FERN:
             return 0.04 + smoothstep(0.48, 0.78, moisture) * smoothstep(0.34, 0.72, fertility) * lerpf(0.45, 1.0, patch) * 0.62
         Species.REED:
@@ -206,7 +230,7 @@ func _make_transform(species: int, cell_x: int, cell_z: int, position: Vector2, 
     var height_scale: float = lerpf(height_min, height_max, _hash01(cell_x, cell_z, SALTS[species] + 29))
     var yaw := _hash01(cell_x, cell_z, SALTS[species] + 31) * TAU
     var basis := Basis(Vector3.UP, yaw).scaled(Vector3(width_scale, height_scale, width_scale))
-    var y_offset := 0.55 * height_scale if species == Species.SHRUB else (-0.08 if species == Species.REED else -0.02)
+    var y_offset := -0.08 if species == Species.REED else -0.02
     var local_position := Vector3(position.x - chunk_origin.x, height + y_offset, position.y - chunk_origin.y)
     return Transform3D(basis, local_position)
 
@@ -261,17 +285,34 @@ func _create_meshes() -> void:
     _meshes.append(_create_blade_mesh(0.48, 0.105, 5, 0.08, 0.08))
 
 func _create_shrub_mesh() -> Mesh:
-    var material := StandardMaterial3D.new()
+    var stream = SurfaceTool.new()
+    stream.begin(Mesh.PRIMITIVE_TRIANGLES)
+    # Woody stems and uneven faceted leaf clusters replace the old single ball.
+    _shrub_lobe(stream,Vector3(0,.2,0),Vector3(.065,.24,.065),Color(.43,.31,.18))
+    for i in range(5):
+        var angle: float = i*TAU/5+.24
+        var centre = Vector3(cos(angle)*.38,.48+float(i%3)*.16,sin(angle)*.38)
+        _shrub_lobe(stream,centre,Vector3(.43,.38+.06*(i%2),.39),Color(.80+.035*i,.87+.02*i,.68+.035*i))
+    _shrub_lobe(stream,Vector3(.05,.95,-.04),Vector3(.40,.35,.38),Color(.96,1.0,.82))
+    var mesh = stream.commit()
+    var material = StandardMaterial3D.new()
     material.vertex_color_use_as_albedo = true
-    material.albedo_color = Color.WHITE
-    material.roughness = 0.97
-    var mesh := SphereMesh.new()
-    mesh.radius = 0.62
-    mesh.height = 1.10
-    mesh.radial_segments = 8
-    mesh.rings = 5
-    mesh.material = material
+    material.roughness = .97
+    mesh.surface_set_material(0,material)
     return mesh
+
+func _shrub_lobe(stream: SurfaceTool, centre: Vector3, size: Vector3, colour: Color):
+    for i in range(7):
+        var a: float = TAU*i/7
+        var b: float = TAU*(i+1)/7
+        var left = centre+Vector3(cos(a)*size.x,0,sin(a)*size.z)
+        var right = centre+Vector3(cos(b)*size.x,0,sin(b)*size.z)
+        for triangle in [[centre+Vector3.UP*size.y,right,left],[centre-Vector3.UP*size.y,left,right]]:
+            var normal: Vector3 = -(triangle[1]-triangle[0]).cross(triangle[2]-triangle[0]).normalized()
+            for vertex in triangle:
+                stream.set_normal(normal)
+                stream.set_color(colour)
+                stream.add_vertex(vertex)
 
 func _create_blade_mesh(height: float, half_width: float, blade_count: int, bend: float, wind: float) -> ArrayMesh:
     var vertices := PackedVector3Array()
@@ -377,3 +418,79 @@ func _update_chunk_positions() -> void:
     _last_local_origin = Vector2(local_origin.x, local_origin.z)
     for coordinate in _chunks.keys():
         _chunks[coordinate].position = _get_chunk_local_position(coordinate)
+func _sample_species_incremental(species: int, chunk_origin: Vector2, transforms: Array[Transform3D], colours: Array[Color], scheduler: GenerationScheduler) -> void:
+    var cell_size: float = CELL_SIZES[species]
+    var min_x := floori(chunk_origin.x / cell_size)
+    var max_x := floori((chunk_origin.x + TerrainConfiguration.CHUNK_SIZE - 0.001) / cell_size)
+    var min_z := floori(chunk_origin.y / cell_size)
+    var max_z := floori((chunk_origin.y + TerrainConfiguration.CHUNK_SIZE - 0.001) / cell_size)
+    for cell_z in range(min_z, max_z + 1):
+        if not await scheduler.checkpoint(): return
+        for cell_x in range(min_x, max_x + 1):
+            if not await scheduler.checkpoint(): return
+            var candidate := _get_candidate(cell_x, cell_z, cell_size, JITTERS[species], SALTS[species])
+            if not _inside_chunk(candidate, chunk_origin) or _camp_sampler.is_clearing(candidate) or _settlement_sampler.is_clearing(candidate) or WayshrineSampler.for_terrain(_terrain).is_clearing(candidate):
+                continue
+            if BiomeProfile.vegetation_weight(candidate) < 0.5:
+                continue
+            var path_suppression: float = TerrainPathSampler.get_grass_suppression(candidate,_terrain)
+            if path_suppression >= 0.995:
+                continue
+            var fertility := _sample_noise(_fertility_noise, candidate)
+            var moisture := _sample_noise(_moisture_noise, candidate)
+            var patch := _sample_noise(_patch_noise, candidate)
+            var probability: float = _get_probability(species, fertility, moisture, patch, candidate) * (1.0 - path_suppression)
+            var roll := _hash01(cell_x, cell_z, SALTS[species] + 11)
+            if roll > probability:
+                continue
+            var height := _camp_sampler.ground_height(candidate)
+            var altitude_weight := 1.0 - smoothstep(ALTITUDE_FADE_STARTS[species], ALTITUDE_FADE_ENDS[species], height)
+            if roll > probability * altitude_weight:
+                continue
+            var water_clearance := height - _sample_water_level(candidate)
+            if water_clearance < MIN_WATER_CLEARANCES[species] or water_clearance > MAX_WATER_CLEARANCES[species]:
+                continue
+            if species != Species.REED:
+                var shore_weight := smoothstep(MIN_WATER_CLEARANCES[species], MIN_WATER_CLEARANCES[species] + 24.0, water_clearance)
+                if roll > probability * altitude_weight * shore_weight:
+                    continue
+            if _sample_slope(candidate, height) > SLOPE_LIMITS[species]:
+                continue
+            transforms.append(_make_transform(species, cell_x, cell_z, candidate, chunk_origin, height))
+            colours.append(_get_colour(species, cell_x, cell_z, fertility, moisture, candidate))
+
+func _queue_incremental(cell: Vector2i):
+    if _chunks.has(cell) or _building.has(cell): return
+    if GenerationScheduler.instance == null: _build_chunk(cell); return
+    _building[cell] = true
+    _build_incremental(cell,GenerationScheduler.instance)
+
+func _build_incremental(cell: Vector2i, scheduler: GenerationScheduler):
+    scheduler.active_owner = self
+    scheduler.active_priority = 1 if maxi(absi(cell.x-_current_chunk.x),absi(cell.y-_current_chunk.y)) <= 1 else 2
+    await WorldPathNetwork.for_terrain(_terrain).routes_in_chunk_incremental(cell,scheduler)
+    var origin_point = Vector2(cell)*TerrainConfiguration.CHUNK_SIZE
+    var shrine_first = Vector2i(floori(origin_point.x/WayshrineSampler.CELL_SIZE),floori(origin_point.y/WayshrineSampler.CELL_SIZE))
+    var end_point = origin_point+Vector2.ONE*TerrainConfiguration.CHUNK_SIZE
+    var shrine_last = Vector2i(floori(end_point.x/WayshrineSampler.CELL_SIZE),floori(end_point.y/WayshrineSampler.CELL_SIZE))
+    for z in range(shrine_first.y,shrine_last.y+1):
+        for x in range(shrine_first.x,shrine_last.x+1):
+            await WayshrineSampler.for_terrain(_terrain).sample_cell_incremental(Vector2i(x,z),scheduler)
+    var origin = Vector2(cell)*TerrainConfiguration.CHUNK_SIZE
+    var batches = []
+    for species in range(SPECIES_NAMES.size()):
+        var transforms: Array[Transform3D] = []
+        var colours: Array[Color] = []
+        await _sample_species_incremental(species,origin,transforms,colours,scheduler)
+        batches.append([transforms,colours])
+    _building.erase(cell)
+    if not is_inside_tree() or not _desired_chunks.has(cell) or _chunks.has(cell): return
+    if not await scheduler.checkpoint(self): return
+    var chunk = Node3D.new()
+    chunk.name = "GroundFloraChunk_%d_%d"%[cell.x,cell.y]
+    chunk.position = _get_chunk_local_position(cell)
+    add_child(chunk)
+    for species in range(SPECIES_NAMES.size()):
+        if not await scheduler.checkpoint(self): chunk.queue_free(); return
+        _add_batch(chunk,species,batches[species][0],batches[species][1])
+    _chunks[cell] = chunk

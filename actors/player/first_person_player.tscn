@@ -1,9 +1,11 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://actors/player/first_person_player.gd" id="1_player_script"]
 [ext_resource type="Script" path="res://actors/player/player_vitals.gd" id="2_player_vitals"]
 [ext_resource type="Script" path="res://actors/player/player_inventory.gd" id="3_player_inventory"]
 [ext_resource type="Script" path="res://actors/player/player_equipment.gd" id="4_player_equipment"]
+
+[ext_resource type="Script" path="res://actors/player/arms/first_person_arms.gd" id="5_arms"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
 radius = 0.4
@@ -11,6 +13,7 @@ height = 1.8
 
 [node name="FirstPersonPlayer" type="CharacterBody3D"]
 script = ExtResource("1_player_script")
+collision_mask = 5
 floor_stop_on_slope = true
 floor_max_angle = 0.785398
 safe_margin = 0.001
@@ -37,5 +40,8 @@ near = 0.05
 far = 768.0
 
 [node name="EquipmentMount" type="Node3D" parent="Head/Camera3D"]
-position = Vector3(0.38, -0.34, -1.1)
-scale = Vector3(0.25, 0.25, 0.25)
+position = Vector3(0.28, -0.25, -0.65)
+scale = Vector3(0.55, 0.55, 0.55)
+
+[node name="Arms" type="Node3D" parent="Head/Camera3D"]
+script = ExtResource("5_arms")

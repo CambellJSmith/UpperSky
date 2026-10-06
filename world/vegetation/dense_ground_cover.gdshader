@@ -4,6 +4,7 @@ render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
 uniform sampler2D terrain_map : filter_nearest, repeat_disable;
 uniform vec2 carpet_world_origin = vec2(0.0);
 uniform vec2 terrain_map_world_origin = vec2(0.0);
+uniform vec2 player_world_position = vec2(0.0);
 uniform float carpet_size = 320.0;
 uniform float patch_spacing = 3.2;
 uniform float terrain_vertex_spacing = 8.0;
@@ -61,7 +62,8 @@ void vertex() {
 
     float radial_distance = length(map_uv - vec2(0.5));
     float radial_weight = 1.0 - smoothstep(0.445, 0.5, radial_distance);
-    float effective_coverage = clamp(patch_terrain_sample.g * radial_weight, 0.0, 1.0);
+    float distance_weight = 1.0 - smoothstep(125.0, 145.0, distance(absolute_patch_root, player_world_position));
+    float effective_coverage = clamp(patch_terrain_sample.g * radial_weight * distance_weight, 0.0, 1.0);
     float density_threshold = mix(0.02, 0.98, density_random);
     patch_visible = step(density_threshold, effective_coverage);
     grass_colour = mix(dry_colour, lush_colour, clamp(effective_coverage * 0.72 + colour_random * 0.28, 0.0, 1.0));

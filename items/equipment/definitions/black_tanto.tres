@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="EquipmentDefinition" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://items/equipment/equipment_definition.gd" id="1_definition"]
+[ext_resource type="PackedScene" path="res://items/equipment/scenes/black_tanto.tscn" id="2_scene"]
+
+[resource]
+script = ExtResource("1_definition")
+item_id = &"black_tanto"
+display_name = "Black Tanto"
+category = 0
+unit_weight = 0.7
+held_scene = ExtResource("2_scene")
+reach = 1.75
+primary_cooldown = 0.38
+damage = 18.0
+tool_power = 0.0
+tool_tags = PackedStringArray("melee", "blade", "knife")

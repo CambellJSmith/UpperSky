@@ -25,6 +25,7 @@ func build(pair_id: int, dungeon_seed: int, region_coordinate: Vector2i) -> void
     _build_geometry() # Converts validated logical cells into combined procedural visual and collision meshes.
     _build_interior_doors() # Creates the two generated exits that map one-to-one onto the exterior paired doors.
     _build_procedural_lighting() # Adds seeded runtime light fixtures across connected floor cells.
+    CavePopulation.populate(self)
     _environment = _create_environment() # Creates the textureless dungeon-specific camera environment used during this world mode.
 
 func get_environment() -> Environment: # Returns the generated environment resource that should override the overworld while this dungeon is active.

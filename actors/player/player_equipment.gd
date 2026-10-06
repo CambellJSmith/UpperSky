@@ -10,6 +10,8 @@ const PREVIOUS_ACTION: StringName = &"EquipmentPrevious"
 @onready var _inventory: PlayerInventory = $"../PlayerInventory"
 @onready var _mount: Node3D = $"../Head/Camera3D/EquipmentMount"
 
+@onready var _arms: FirstPersonArms = $"../Head/Camera3D/Arms"
+
 var _equipped_definition: EquipmentDefinition
 var _equipped_item: EquippedItem
 var _observed_inventory_revision: int = -1
@@ -49,10 +51,13 @@ func equip_item(item_id: StringName) -> bool:
     _equipped_item = instance as EquippedItem
     _mount.add_child(_equipped_item)
     _equipped_item.initialize(definition, _player, _player.get_view_camera())
+    _arms.bind_item(_equipped_item)
     _revision += 1
     return true
 
 func unequip() -> void:
+    if _arms != null:
+        _arms.bind_item(null)
     if _equipped_item != null:
         _equipped_item.on_unequipped()
         _equipped_item.queue_free()

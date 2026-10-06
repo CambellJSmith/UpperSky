@@ -52,6 +52,7 @@ var _initial_collision_mask: int = 0
 var _initial_motion_mode: int = CharacterBody3D.MOTION_MODE_GROUNDED
 
 func _ready() -> void:
+    add_to_group("player")
     _gravity = float(ProjectSettings.get_setting("physics/3d/default_gravity"))
     _initial_collision_layer = collision_layer
     _initial_collision_mask = collision_mask
@@ -120,6 +121,15 @@ func _unhandled_input(event: InputEvent) -> void:
         get_viewport().set_input_as_handled()
 
 func _physics_process(delta: float) -> void:
+    # Timing scopes are inactive until a console recording begins.
+    if not RuntimeProfiler.recording:
+        _profile__physics_process(delta)
+        return
+    var _profile_token = RuntimeProfiler.begin("player.physics")
+    _profile__physics_process(delta)
+    RuntimeProfiler.end(_profile_token)
+
+func _profile__physics_process(delta: float) -> void:
     _stamina_exertion_this_frame = false
     if _gameplay_input_enabled:
         _apply_controller_look(delta)
@@ -332,3 +342,5 @@ func _toggle_mouse_capture() -> void:
         Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
         return
     Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+func get_health_state() -> HealthState: return _vitals.get_health_state()

@@ -1,0 +1,83 @@
+extends Node3D
+class_name PathStreamer
+
+@onready var _terrain: InfiniteTerrain = $"../Terrain"
+@onready var _player: FirstPersonPlayer = $"../../DynamicEntities/Player"
+var _building: Dictionary = {}
+var _builder: PathMeshBuilder
+var _chunks: Dictionary = {}
+var _pending: Array[Vector2i] = []
+var _centre: Vector2i = Vector2i(2147483647,2147483647)
+func _ready(): _builder = PathMeshBuilder.new(_terrain)
+func _process(_delta: float):
+    # Timing scopes are inactive until a console recording begins.
+    if not RuntimeProfiler.recording:
+        _profile__process(_delta)
+        return
+    var _profile_token = RuntimeProfiler.begin("paths.stream")
+    _profile__process(_delta)
+    RuntimeProfiler.end(_profile_token)
+
+func _profile__process(_delta: float):
+    if _terrain.get_loaded_chunk_count() == 0 or not _player.is_physics_processing(): return
+    var world = _terrain.local_to_world_position(_player.global_position)
+    var centre = Vector2i(floori(world.x/WorldPathNetwork.CHUNK_SIZE),floori(world.z/WorldPathNetwork.CHUNK_SIZE))
+    for cell in _chunks:
+        var node: MeshInstance3D = _chunks[cell]
+        node.position = _terrain.world_to_local_position(Vector3(cell.x*WorldPathNetwork.CHUNK_SIZE,0,cell.y*WorldPathNetwork.CHUNK_SIZE))
+    if centre != _centre: _refresh(centre)
+    if not _pending.is_empty() and _building.is_empty():
+        var cell = _pending.pop_front()
+        if GenerationScheduler.instance == null: _build(cell)
+        else:
+            _building[cell] = true
+            _build_incremental(cell,GenerationScheduler.instance)
+
+func _refresh(centre: Vector2i):
+    _centre = centre
+    _pending.clear()
+    for cell in _chunks.keys():
+        if maxi(absi(cell.x-centre.x),absi(cell.y-centre.y)) > 4:
+            var node = _chunks[cell]
+            remove_child(node)
+            node.queue_free()
+            _chunks.erase(cell)
+    for z in range(-3,4):
+        for x in range(-3,4):
+            var cell = centre+Vector2i(x,z)
+            if not _chunks.has(cell): _pending.append(cell)
+    _pending.sort_custom(func(a,b): return Vector2(a-centre).length_squared() < Vector2(b-centre).length_squared())
+
+func _build(cell: Vector2i):
+    # Timing scopes are inactive until a console recording begins.
+    if not RuntimeProfiler.recording:
+        _profile__build(cell)
+        return
+    var _profile_token = RuntimeProfiler.begin("paths.build_chunk")
+    _profile__build(cell)
+    RuntimeProfiler.end(_profile_token)
+
+func _profile__build(cell: Vector2i):
+    if _chunks.has(cell): return
+    var mesh = _builder.build(cell)
+    var node = MeshInstance3D.new()
+    node.name = "Paths_%d_%d"%[cell.x,cell.y]
+    node.mesh = mesh
+    node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+    node.position = _terrain.world_to_local_position(Vector3(cell.x*WorldPathNetwork.CHUNK_SIZE,0,cell.y*WorldPathNetwork.CHUNK_SIZE))
+    add_child(node)
+    _chunks[cell] = node
+
+func _build_incremental(cell: Vector2i, scheduler: GenerationScheduler):
+    scheduler.active_owner = self
+    scheduler.active_priority = 1 if maxi(absi(cell.x-_centre.x),absi(cell.y-_centre.y)) <= 1 else 2
+    var mesh = await _builder.build_incremental(cell,scheduler)
+    _building.erase(cell)
+    if not is_inside_tree() or _chunks.has(cell) or maxi(absi(cell.x-_centre.x),absi(cell.y-_centre.y)) > 4: return
+    var node = MeshInstance3D.new()
+    node.name = "Paths_%d_%d"%[cell.x,cell.y]
+    node.mesh = mesh
+    node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+    node.position = _terrain.world_to_local_position(Vector3(cell.x*WorldPathNetwork.CHUNK_SIZE,0,cell.y*WorldPathNetwork.CHUNK_SIZE))
+    add_child(node)
+    _chunks[cell] = node

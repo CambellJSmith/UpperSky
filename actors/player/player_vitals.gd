@@ -2,26 +2,30 @@ extends Node # Owns authoritative player health, stamina, and mana values indepe
 class_name PlayerVitals # Makes the player resource model available to HUD, inventory, combat, developer controls, and future gameplay systems.
 
 const MINIMUM_MAXIMUM_VALUE: float = 0.001 # Prevents invalid zero-range resources when a maximum is changed dynamically.
-const DEFAULT_MAXIMUM_HEALTH: float = 100.0 # Defines the initial maximum health displayed by the existing red status bar.
+const DEFAULT_MAXIMUM_HEALTH: float = HealthState.DEFAULT_MAXIMUM # Defines the initial maximum health displayed by the existing red status bar.
 const DEFAULT_MAXIMUM_STAMINA: float = 100.0 # Defines the initial maximum stamina and therefore the initial inventory weight capacity.
 const DEFAULT_MAXIMUM_MANA: float = 100.0 # Defines the initial maximum mana displayed by the existing blue status bar.
 
-var _health: float = DEFAULT_MAXIMUM_HEALTH # Stores the player's current health.
-var _maximum_health: float = DEFAULT_MAXIMUM_HEALTH # Stores the authoritative current maximum health.
 var _stamina: float = DEFAULT_MAXIMUM_STAMINA # Stores the player's current stamina.
 var _maximum_stamina: float = DEFAULT_MAXIMUM_STAMINA # Stores the authoritative current maximum stamina copied by inventory capacity.
 var _mana: float = DEFAULT_MAXIMUM_MANA # Stores the player's current mana.
 var _maximum_mana: float = DEFAULT_MAXIMUM_MANA # Stores the authoritative current maximum mana.
-var _infinite_health_enabled: bool = false # Tracks whether developer controls currently prevent health from dropping below maximum.
 var _infinite_stamina_enabled: bool = false # Tracks whether developer controls currently prevent stamina from being consumed.
 var _infinite_mana_enabled: bool = false # Tracks whether developer controls currently prevent mana from dropping below maximum.
 var _revision: int = 0 # Increments whenever any displayed resource changes so polling interfaces can refresh without signals.
 
+var _health_state: HealthState = HealthState.new()
+func _init(): _health_state.changed.connect(func(): _revision += 1)
+func get_health_state() -> HealthState: return _health_state
+func heal(amount: float) -> float: return _health_state.heal(amount)
+func is_dead() -> bool: return _health_state.is_dead()
+func get_health_ratio() -> float: return _health_state.get_health_ratio()
+
 func get_health() -> float: # Returns the current health value.
-    return _health # Exposes the authoritative current health without mutable node access.
+    return _health_state.get_health()
 
 func get_maximum_health() -> float: # Returns the current maximum health value.
-    return _maximum_health # Exposes the authoritative health range.
+    return _health_state.get_maximum_health()
 
 func get_stamina() -> float: # Returns the current stamina value.
     return _stamina # Exposes the authoritative current stamina.
@@ -42,7 +46,7 @@ func get_revision() -> int: # Reports whether any resource has changed since a c
     return _revision # Returns the monotonically increasing resource revision.
 
 func is_infinite_health_enabled() -> bool: # Reports whether the developer infinite-health mode is active.
-    return _infinite_health_enabled # Exposes the current health-cheat state without allowing direct mutation.
+    return _health_state.is_infinite_health_enabled()
 
 func is_infinite_stamina_enabled() -> bool: # Reports whether the developer infinite-stamina mode is active.
     return _infinite_stamina_enabled # Exposes the current stamina-cheat state without allowing direct mutation.
@@ -51,11 +55,7 @@ func is_infinite_mana_enabled() -> bool: # Reports whether the developer infinit
     return _infinite_mana_enabled # Exposes the current mana-cheat state without allowing direct mutation.
 
 func set_infinite_health_enabled(enabled: bool) -> void: # Enables or disables authoritative prevention of player health loss.
-    if enabled == _infinite_health_enabled: # Detects a developer request that would not change cheat state.
-        return # Avoids redundant resource work for an unchanged mode.
-    _infinite_health_enabled = enabled # Stores the requested health-cheat state before normalizing the current value.
-    if _infinite_health_enabled: # Detects activation that must immediately restore the protected resource.
-        _set_health_internal(_maximum_health) # Restores health to maximum through the shared revision-tracked mutation path.
+    _health_state.set_infinite_health_enabled(enabled)
 
 func set_infinite_stamina_enabled(enabled: bool) -> void: # Enables or disables authoritative prevention of player stamina consumption.
     if enabled == _infinite_stamina_enabled: # Detects a developer request that would not change cheat state.
@@ -72,26 +72,13 @@ func set_infinite_mana_enabled(enabled: bool) -> void: # Enables or disables aut
         _set_mana_internal(_maximum_mana) # Restores mana to maximum through the shared revision-tracked mutation path.
 
 func apply_damage(amount: float) -> float: # Removes positive health through the existing clamped revision-tracked player resource model and reports actual damage applied.
-    if _infinite_health_enabled: # Detects developer invulnerability before damage can alter the protected health pool.
-        return 0.0 # Reports that no health damage was applied while infinite health is active.
-    var requested_damage: float = maxf(amount, 0.0) # Rejects negative damage without allowing combat systems to heal the player accidentally.
-    if is_zero_approx(requested_damage) or is_zero_approx(_health): # Detects a no-op request or a player whose health is already fully depleted.
-        return 0.0 # Reports that no health could be removed for the rejected request.
-    var previous_health: float = _health # Captures pre-hit health so callers can know the exact clamped damage that changed state.
-    set_health(_health - requested_damage) # Applies damage through the normal setter so maximum clamping and HUD revision tracking remain authoritative.
-    return previous_health - _health # Returns the exact health removed, including a partial final hit that reaches zero.
+    return _health_state.apply_damage(amount)
 
 func set_health(value: float) -> void: # Changes current health while respecting its current maximum and developer protection state.
-    var requested_value: float = _maximum_health if _infinite_health_enabled else value # Forces maximum health while developer infinite-health protection is active.
-    _set_health_internal(requested_value) # Applies the normalized request through the shared clamped revision-tracked mutation path.
+    _health_state.set_health(value)
 
 func set_maximum_health(value: float) -> void: # Changes maximum health and clamps current health into the new range.
-    var next_maximum: float = maxf(value, MINIMUM_MAXIMUM_VALUE) # Guarantees a valid positive maximum.
-    if is_equal_approx(next_maximum, _maximum_health): # Detects a no-op maximum assignment.
-        return # Leaves the revision unchanged when nothing changed.
-    _maximum_health = next_maximum # Stores the validated maximum health.
-    _health = _maximum_health if _infinite_health_enabled else minf(_health, _maximum_health) # Keeps protected health full while ordinary health only clamps downward when required.
-    _revision += 1 # Marks the changed health range and any resulting current-health normalization for polling consumers.
+    _health_state.set_maximum_health(value)
 
 func set_stamina(value: float) -> void: # Changes current stamina while respecting its current maximum and developer protection state.
     var requested_value: float = _maximum_stamina if _infinite_stamina_enabled else value # Forces maximum stamina while developer infinite-stamina protection is active.
@@ -138,11 +125,7 @@ func set_maximum_mana(value: float) -> void: # Changes maximum mana and clamps c
     _revision += 1 # Marks both the range and potentially current mana as changed.
 
 func _set_health_internal(value: float) -> void: # Applies one health mutation without re-evaluating developer cheat policy.
-    var next_value: float = clampf(value, 0.0, _maximum_health) # Restricts health to its valid range.
-    if is_equal_approx(next_value, _health): # Detects a no-op assignment.
-        return # Avoids unnecessary interface refreshes.
-    _health = next_value # Stores the validated health value.
-    _revision += 1 # Marks the resource model as changed.
+    _health_state.set_health(value)
 
 func _set_stamina_internal(value: float) -> void: # Applies one stamina mutation without re-evaluating developer cheat policy.
     var next_value: float = clampf(value, 0.0, _maximum_stamina) # Restricts stamina to its valid range.

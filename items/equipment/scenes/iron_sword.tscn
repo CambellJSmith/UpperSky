@@ -1,17 +1,10 @@
 [gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://items/equipment/melee_equipment.gd" id="1_melee"]
-[ext_resource type="Texture2D" path="res://items/equipment/images/iron_sword.png" id="2_texture"]
+[ext_resource type="PackedScene" path="res://items/equipment/models/iron_sword.tscn" id="2_model"]
 
 [node name="IronSword" type="Node3D"]
 script = ExtResource("1_melee")
-rotation_degrees = Vector3(-8, 0, -10)
+rotation_degrees = Vector3(-8, -18, -10)
 
-[node name="HeldSprite" type="Sprite3D" parent="."]
-texture = ExtResource("2_texture")
-pixel_size = 0.0036
-offset = Vector2(0, -52)
-shaded = false
-transparent = true
-no_depth_test = true
-render_priority = 1
+[node name="Model" parent="." instance=ExtResource("2_model")]

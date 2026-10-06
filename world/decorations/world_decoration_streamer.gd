@@ -19,12 +19,14 @@ var _mesh_library: WorldDecorationMeshLibrary # Owns shared LOD meshes and reusa
 var _current_chunk_coordinate: Vector2i = INVALID_CHUNK_COORDINATE # Stores the active streaming centre around the player.
 var _chunks: Dictionary[Vector2i, WorldDecorationChunk] = {} # Stores every loaded decoration chunk by absolute world-grid coordinate.
 var _desired_chunks: Dictionary[Vector2i, bool] = {} # Stores the current visible decoration set.
+var _building: Dictionary = {}
 var _pending_chunks: Array[Vector2i] = [] # Holds missing chunks in near-to-far generation order.
 var _pending_chunk_index: int = 0 # Tracks the next queued coordinate without repeatedly shifting the array.
 var _pending_lod_updates: Array[Vector2i] = [] # Holds retained chunks that crossed a visual detail boundary.
 var _pending_lod_index: int = 0 # Tracks the next LOD update without shifting the queue.
 var _last_origin_local_position: Vector2 = Vector2(INF, INF) # Detects floating-origin changes so loaded decoration chunks remain aligned.
 var _state_refresh_elapsed: float = 0.0 # Accumulates time between inexpensive stream-state checks.
+var _initializing = false
 var _initialized: bool = false # Tracks whether the terrain-backed initial decoration neighbourhood has been created.
 
 func _ready() -> void: # Resolves game-scene dependencies while waiting for shoreline spawn initialization to finish.
@@ -35,12 +37,12 @@ func _ready() -> void: # Resolves game-scene dependencies while waiting for shor
     if player_node is Node3D: # Verifies the expected spatial player dependency.
         _player = player_node as Node3D # Stores the subject that controls streaming and collision distance.
 
-func initialize(terrain: InfiniteTerrain, player: Node3D, spawn_world_position: Vector2) -> void: # Connects the streamer and builds the current dense decoration chunk.
+func initialize(terrain: InfiniteTerrain, player: Node3D, spawn_world_position: Vector2, library: WorldDecorationMeshLibrary = null) -> void: # Connects the streamer and builds the current dense decoration chunk.
     if _initialized: # Detects an accidental repeated initialization request.
         return # Preserves the existing deterministic streamed state.
     _terrain = terrain # Stores the exact world query and coordinate-conversion service.
     _player = player # Stores the subject that controls streaming distance and collision.
-    _mesh_library = WorldDecorationMeshLibrary.new() # Builds every shared smooth LOD and collision resource once.
+    _mesh_library = library if library != null else WorldDecorationMeshLibrary.new() # Builds every shared smooth LOD and collision resource once.
     _sampler = WorldDecorationSampler.new(_terrain) # Creates deterministic dense scatter fields using the established terrain world seed.
     _sampler.set_exclusion_area(spawn_world_position, SPAWN_EXCLUSION_RADIUS) # Protects the immediate player start from generated obstacles.
     _current_chunk_coordinate = _get_chunk_coordinate(_get_player_world_position()) # Calculates the initial absolute decoration chunk coordinate.
@@ -50,7 +52,16 @@ func initialize(terrain: InfiniteTerrain, player: Node3D, spawn_world_position: 
     _update_chunk_local_positions() # Aligns all generated chunks with the terrain's current floating origin.
     _initialized = true # Marks the streamer ready for ordinary bounded updates.
 
-func _process(delta: float) -> void: # Advances bounded dense streaming while checking expensive state at a reduced frequency.
+func _process(delta: float) -> void:
+    # Timing scopes are inactive until a console recording begins.
+    if not RuntimeProfiler.recording:
+        _profile__process(delta)
+        return
+    var _profile_token = RuntimeProfiler.begin("decorations.stream")
+    _profile__process(delta)
+    RuntimeProfiler.end(_profile_token)
+
+func _profile__process(delta: float) -> void: # Advances bounded dense streaming while checking expensive state at a reduced frequency.
     if not _initialized: # Detects the startup period before the game finishes collision-backed shoreline placement.
         _try_initialize_from_game_scene() # Initializes only after terrain chunks exist and player physics has resumed.
         return # Defers ordinary streaming until dependencies and spawn position are authoritative.
@@ -68,6 +79,7 @@ func _process(delta: float) -> void: # Advances bounded dense streaming while ch
     _apply_pending_lod_updates() # Rebuilds only a few retained-chunk LOD buffers per frame to avoid boundary spikes.
 
 func _try_initialize_from_game_scene() -> void: # Detects completion of the existing deferred terrain and player spawn sequence.
+    if _initializing: return
     if _terrain == null or _player == null: # Waits for both scene dependencies to resolve.
         return # Leaves startup polling active.
     if _terrain.get_loaded_chunk_count() <= 0: # Detects whether the terrain controller has completed its initial synchronous chunk build.
@@ -75,7 +87,11 @@ func _try_initialize_from_game_scene() -> void: # Detects completion of the exis
     if not _player.is_physics_processing(): # Detects the period while the game root deliberately suspends movement for spawn placement.
         return # Waits until the final collision-safe player position has been applied.
     var player_world_position: Vector3 = _terrain.local_to_world_position(_player.global_position) # Converts the resolved shoreline start into stable absolute coordinates.
-    initialize(_terrain, _player, Vector2(player_world_position.x, player_world_position.z)) # Builds decorations while protecting the complete immediate spawn area.
+    var spawn = Vector2(player_world_position.x,player_world_position.z)
+    if GenerationScheduler.instance == null: initialize(_terrain,_player,spawn)
+    else:
+        _initializing = true
+        _initialize_incremental(spawn,GenerationScheduler.instance)
 
 func get_loaded_chunk_count() -> int: # Reports the number of currently retained decoration chunks for profiling.
     return _chunks.size() # Returns both populated and empty generated chunk records.
@@ -109,6 +125,7 @@ func _append_ring_coordinates(centre: Vector2i, ring: int) -> void: # Adds one d
             _pending_chunks.append(chunk_coordinate) # Queues the missing chunk in useful near-to-far order.
 
 func _build_pending_chunks() -> void: # Builds a bounded number of queued dense decoration chunks during the current frame.
+    if not _building.is_empty(): return
     var chunks_built: int = 0 # Tracks completed work against the per-frame budget.
     while chunks_built < CHUNKS_BUILT_PER_FRAME and _pending_chunk_index < _pending_chunks.size(): # Continues while budget and queued work remain.
         var chunk_coordinate: Vector2i = _pending_chunks[_pending_chunk_index] # Retrieves the next missing coordinate without shifting the queue.
@@ -117,7 +134,10 @@ func _build_pending_chunks() -> void: # Builds a bounded number of queued dense 
             continue # Skips chunks that are no longer visible.
         if _chunks.has(chunk_coordinate): # Detects a chunk created synchronously or through an earlier queue entry.
             continue # Avoids duplicate generation.
-        _build_chunk(chunk_coordinate) # Generates deterministic placements and their LOD-batched visuals.
+        if GenerationScheduler.instance == null: _build_chunk(chunk_coordinate)
+        else:
+            _building[chunk_coordinate] = true
+            _build_incremental(chunk_coordinate,GenerationScheduler.instance) # Generates deterministic placements and their LOD-batched visuals.
         chunks_built += 1 # Consumes one unit of the current frame's generation budget.
 
 func _build_initial_area(centre: Vector2i) -> void: # Builds only the current decoration chunk during startup.
@@ -126,9 +146,21 @@ func _build_initial_area(centre: Vector2i) -> void: # Builds only the current de
             var chunk_coordinate: Vector2i = centre + Vector2i(offset_x, offset_z) # Converts the local offset into absolute chunk space.
             if _chunks.has(chunk_coordinate): # Detects a chunk already built through another path.
                 continue # Avoids duplicate nodes and placements.
-            _build_chunk(chunk_coordinate) # Creates the startup object chunk synchronously.
+            if GenerationScheduler.instance == null: _build_chunk(chunk_coordinate)
+            else:
+                _building[chunk_coordinate] = true
+                _build_incremental(chunk_coordinate,GenerationScheduler.instance) # Creates the startup object chunk synchronously.
 
-func _build_chunk(chunk_coordinate: Vector2i) -> void: # Generates one dense decoration chunk and installs it at the current floating-origin position.
+func _build_chunk(chunk_coordinate: Vector2i) -> void:
+    # Timing scopes are inactive until a console recording begins.
+    if not RuntimeProfiler.recording:
+        _profile__build_chunk(chunk_coordinate)
+        return
+    var _profile_token = RuntimeProfiler.begin("decorations.build_chunk")
+    _profile__build_chunk(chunk_coordinate)
+    RuntimeProfiler.end(_profile_token)
+
+func _profile__build_chunk(chunk_coordinate: Vector2i) -> void: # Generates one dense decoration chunk and installs it at the current floating-origin position.
     var placements: Array[WorldDecorationPlacement] = _sampler.sample_chunk(chunk_coordinate, _mesh_library.get_boulder_variant_count()) # Generates deterministic trees and rounded rocks for this absolute chunk.
     var chunk: WorldDecorationChunk = WorldDecorationChunk.new() # Creates the independently streamable decoration body.
     chunk.name = "DecorationChunk_%d_%d" % [chunk_coordinate.x, chunk_coordinate.y] # Gives the runtime node a coordinate-derived diagnostic name.
@@ -192,9 +224,19 @@ func _queue_lod_updates() -> void: # Queues retained chunks for bounded visual d
                 if _chunks.has(chunk_coordinate): # Detects a retained chunk requiring a tier check.
                     _pending_lod_updates.append(chunk_coordinate) # Queues near-to-far work without rebuilding unchanged tiers immediately.
 
-func _apply_pending_lod_updates() -> void: # Applies only a few retained-chunk LOD changes during the current rendered frame.
+func _apply_pending_lod_updates() -> void:
+    # Timing scopes are inactive until a console recording begins.
+    if not RuntimeProfiler.recording:
+        _profile__apply_pending_lod_updates()
+        return
+    var _profile_token = RuntimeProfiler.begin("decorations.lod")
+    _profile__apply_pending_lod_updates()
+    RuntimeProfiler.end(_profile_token)
+
+func _profile__apply_pending_lod_updates() -> void: # Applies only a few retained-chunk LOD changes during the current rendered frame.
     var updates_applied: int = 0 # Tracks work against the per-frame LOD rebuild budget.
-    while updates_applied < LOD_UPDATES_PER_FRAME and _pending_lod_index < _pending_lod_updates.size(): # Continues while budget and queued work remain.
+    while updates_applied < LOD_UPDATES_PER_FRAME and _pending_lod_index < _pending_lod_updates.size():
+        if GenerationScheduler.instance != null and Time.get_ticks_usec() >= GenerationScheduler.instance._deadline: return # Continues while budget and queued work remain.
         var chunk_coordinate: Vector2i = _pending_lod_updates[_pending_lod_index] # Retrieves the next retained coordinate without shifting the queue.
         _pending_lod_index += 1 # Advances sequentially to the next item.
         if not _chunks.has(chunk_coordinate): # Detects a chunk unloaded after the queue was built.
@@ -202,3 +244,36 @@ func _apply_pending_lod_updates() -> void: # Applies only a few retained-chunk L
         var chunk: WorldDecorationChunk = _chunks[chunk_coordinate] # Retrieves the retained object chunk.
         chunk.set_lod_level(_get_lod_level(_get_chunk_distance(chunk_coordinate))) # Rebuilds buffers only if this chunk actually crossed an LOD tier.
         updates_applied += 1 # Consumes one bounded update slot even when the chunk was already on the correct tier.
+
+func _build_incremental(cell: Vector2i, scheduler: GenerationScheduler):
+    scheduler.active_owner = self
+    scheduler.active_priority = 1 if _get_chunk_distance(cell) <= 1 else 2
+    await WorldPathNetwork.for_terrain(_terrain).routes_in_chunk_incremental(cell,scheduler)
+    var origin_point = Vector2(cell)*TerrainConfiguration.CHUNK_SIZE
+    var shrine_first = Vector2i(floori(origin_point.x/WayshrineSampler.CELL_SIZE),floori(origin_point.y/WayshrineSampler.CELL_SIZE))
+    var end_point = origin_point+Vector2.ONE*TerrainConfiguration.CHUNK_SIZE
+    var shrine_last = Vector2i(floori(end_point.x/WayshrineSampler.CELL_SIZE),floori(end_point.y/WayshrineSampler.CELL_SIZE))
+    for z in range(shrine_first.y,shrine_last.y+1):
+        for x in range(shrine_first.x,shrine_last.x+1):
+            await WayshrineSampler.for_terrain(_terrain).sample_cell_incremental(Vector2i(x,z),scheduler)
+    var placements = await _sampler.sample_chunk_incremental(cell,_mesh_library.get_boulder_variant_count(),scheduler)
+    _building.erase(cell)
+    if not is_inside_tree() or not _desired_chunks.has(cell) or _chunks.has(cell): return
+    if not await scheduler.checkpoint(self): return
+    var chunk = WorldDecorationChunk.new()
+    chunk.name = "DecorationChunk_%d_%d"%[cell.x,cell.y]
+    chunk.position = _get_chunk_local_position(cell)
+    add_child(chunk)
+    var distance = _get_chunk_distance(cell)
+    chunk.configure(placements,_mesh_library,_get_lod_level(distance))
+    _chunks[cell] = chunk
+    chunk.set_collision_active(distance <= COLLISION_RADIUS)
+
+func _initialize_incremental(spawn: Vector2, scheduler: GenerationScheduler):
+    scheduler.active_owner = self
+    scheduler.active_priority = 1
+    var library = WorldDecorationMeshLibrary.new(true)
+    await library.initialize_incremental(scheduler)
+    if not is_inside_tree() or not await scheduler.checkpoint(self): return
+    initialize(_terrain,_player,spawn,library)
+    _initializing = false

@@ -48,7 +48,8 @@ func initialize(player: FirstPersonPlayer, inventory: PlayerInventory, equipment
 func is_open() -> bool: # Reports whether the inventory overlay is currently visible and interactive.
     return _is_open # Returns the interface's explicit open state.
 
-func _unhandled_input(event: InputEvent) -> void: # Handles inventory open and close actions that gameplay did not consume.
+func _unhandled_input(event: InputEvent) -> void:
+    if not _is_open and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED: return # Handles inventory open and close actions that gameplay did not consume.
     if event is InputEventKey and (event as InputEventKey).echo: # Rejects repeated keyboard echo events from held keys.
         return # Prevents one press from rapidly toggling the inventory multiple times.
     if event.is_action_pressed(INVENTORY_ACTION): # Detects the authored inventory toggle action.

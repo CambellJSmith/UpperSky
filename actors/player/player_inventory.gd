@@ -112,3 +112,9 @@ func _find_stack_index(item_id: StringName) -> int: # Finds the array position o
         if _stacks[stack_index].get_item_id() == item_id: # Compares the stable identifier for the current row.
             return stack_index # Returns immediately when the requested item is found.
     return -1 # Reports that no matching held stack exists.
+
+func restore_stacks(stacks: Array) -> void:
+    # Restoring already-owned items must not discard them when capacity has fallen.
+    _stacks.clear()
+    for stack in stacks: _stacks.append(stack)
+    _revision += 1

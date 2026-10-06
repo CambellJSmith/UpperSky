@@ -17,4 +17,4 @@ func sample_water_level(world_x: float, world_z: float) -> float: # Returns one 
     var basin_mask: float = smoothstep(0.62, 0.90, 1.0 - basin_value) # Reconstructs the terrain generator's coherent lowland mask.
     var basin_cut: float = basin_mask * TerrainHeightSampler.BASIN_DEPTH # Reconstructs the broad regional basin elevation reduction.
     var regional_height: float = tier_height + plateau_relief * TerrainConfiguration.WATER_REGIONAL_PLATEAU_INFLUENCE - basin_cut * TerrainConfiguration.WATER_REGIONAL_BASIN_INFLUENCE # Reconstructs the broad terrain elevation used to position water independently from mountains and individual valley cuts.
-    return TerrainWaterProfile.get_continuous_level(regional_height) # Converts the regional height into the shared seamless water surface with no tier-boundary jump.
+    return BiomeProfile.water_height(Vector2(world_x, world_z), TerrainWaterProfile.get_continuous_level(regional_height)) # Converts the regional height into the shared seamless water surface with no tier-boundary jump.

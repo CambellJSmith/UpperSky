@@ -33,12 +33,14 @@ const INVALID_STREAM_CELL: Vector2i = Vector2i(2_147_483_647, 2_147_483_647) # F
 @onready var _terrain: InfiniteTerrain = $"../World/Terrain" # Stores the authoritative procedural terrain service used for absolute door placement and overworld return.
 @onready var _dynamic_entities: Node3D = $"../DynamicEntities" # Stores the floating-origin root that must own exterior doors so rebasing keeps them aligned with terrain.
 @onready var _player: FirstPersonPlayer = $"../DynamicEntities/Player" # Stores the existing first-person player that travels between overworld and generated interiors.
-@onready var _training_dummy: Node3D = $"../DynamicEntities/TrainingDummy" # Stores the overworld-only combat target hidden while a dungeon world is active.
 @onready var _world_decorations: Node3D = $"../WorldDecorations" # Stores streamed overworld decorations suspended while the player is in an interior world space.
 @onready var _ground_flora: Node3D = $"../GroundFlora" # Stores streamed ground flora suspended alongside the overworld terrain.
 @onready var _dense_ground_cover: Node3D = $"../DenseGroundCover" # Stores the dense grass streamer that should not follow dungeon-space player coordinates.
 @onready var _underwater_view: CanvasLayer = $"../UnderwaterView" # Stores the overworld water view effect disabled while terrain sampling is intentionally detached.
 
+@onready var _enemy_camps: Node3D = $"../EnemyCamps"
+
+var _refreshing = false
 var _camera: Camera3D # Stores the player's active first-person camera after the composed player scene is ready.
 var _entrance_root: Node3D # Owns all currently streamed exterior doors as one top-level floating-origin entity.
 var _streamed_pairs: Dictionary[int, DungeonPairDefinition] = {} # Stores only deterministic pair definitions currently relevant to the player's overworld neighbourhood.
@@ -77,8 +79,12 @@ func _process(_delta: float) -> void: # Streams deterministic dungeon pairs as t
     var stream_cell: Vector2i = _get_stream_cell(player_horizontal) # Calculates the smaller coarse cell that controls entrance-stream refresh frequency.
     if stream_cell == _last_stream_cell: # Detects ordinary movement that has not crossed far enough to require pair-stream reconsideration.
         return # Reuses the currently streamed entrance set without repeated procedural placement work.
+    if _refreshing: return
     _last_stream_cell = stream_cell # Stores the new stream cell before rebuilding the bounded nearby pair set.
-    _refresh_overworld_pairs(player_horizontal) # Loads newly relevant deterministic pairs and unloads pairs that moved safely beyond the retention distance.
+    if GenerationScheduler.instance == null: _refresh_overworld_pairs(player_horizontal)
+    else:
+        _refreshing = true
+        _run_refresh(player_horizontal,GenerationScheduler.instance)
 
 func _unhandled_input(event: InputEvent) -> void: # Resolves explicit first-person dungeon-door interaction without coupling doors directly to player input.
     if event is InputEventKey and (event as InputEventKey).echo: # Rejects repeated keyboard echo events while the interact key remains held.
@@ -95,7 +101,7 @@ func _try_interact_with_door() -> bool: # Casts a short ray from the active came
     var ray_direction: Vector3 = -_camera.global_transform.basis.z.normalized() # Aims interaction through the current centre-screen view direction.
     var ray_end: Vector3 = ray_origin + ray_direction * INTERACTION_DISTANCE # Limits door targeting to the configured close interaction range.
     var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(ray_origin, ray_end) # Builds a strongly typed direct-space query for the current physics world.
-    query.collision_mask = DungeonDoor.INTERACTION_COLLISION_LAYER # Restricts results to generated dungeon door areas so terrain and enemies cannot block the interaction ray.
+    query.collision_mask = DungeonDoor.INTERACTION_COLLISION_LAYER | CampBedroll.INTERACTION_COLLISION_LAYER | Wayshrine.INTERACTION_COLLISION_LAYER # A nearer bedroll leaves interaction to its rest controller.
     query.collide_with_areas = true # Allows the non-solid DungeonDoor Area3D volumes to be detected.
     query.collide_with_bodies = false # Excludes ordinary solid bodies because they cannot represent dungeon transitions on the dedicated layer.
     var result: Dictionary = _camera.get_world_3d().direct_space_state.intersect_ray(query) # Executes the camera-centred interaction query immediately.
@@ -362,6 +368,9 @@ func _exit_dungeon(pair_id: int, endpoint: DungeonPairDefinition.Endpoint) -> bo
 
 func _set_overworld_active(enabled: bool) -> void: # Enables or suspends expensive overworld-only systems while retaining their deterministic state in memory.
     var process_mode_value: Node.ProcessMode = Node.PROCESS_MODE_INHERIT if enabled else Node.PROCESS_MODE_DISABLED # Selects ordinary inherited processing or complete subtree suspension from the requested world mode.
+    if _enemy_camps != null:
+        _enemy_camps.visible = enabled
+        _enemy_camps.process_mode = process_mode_value
     if _world != null: # Verifies the composed overworld root before changing rendering and processing state.
         _world.visible = enabled # Hides or restores terrain, sun, moon, and world-environment-owned visible children together.
         _world.process_mode = process_mode_value # Stops or resumes terrain streaming and the day/night system as one subtree.
@@ -374,9 +383,6 @@ func _set_overworld_active(enabled: bool) -> void: # Enables or suspends expensi
     if _dense_ground_cover != null: # Verifies the dense grass streamer before changing world mode.
         _dense_ground_cover.visible = enabled # Hides or restores the procedural grass carpet.
         _dense_ground_cover.process_mode = process_mode_value # Prevents grass streaming from interpreting isolated dungeon coordinates as overworld travel.
-    if _training_dummy != null: # Verifies the overworld training target before toggling its presentation and behavior.
-        _training_dummy.visible = enabled # Hides the straw dummy while the player occupies a separate dungeon world space.
-        _training_dummy.process_mode = process_mode_value # Suspends dummy health reset and presentation polling while it is irrelevant.
     if _entrance_root != null: # Verifies the floating-origin exterior entrance collection before toggling it.
         _entrance_root.visible = enabled # Hides all streamed overworld dungeon frames while their matching interior doors are active.
         _entrance_root.process_mode = process_mode_value # Suspends their otherwise minimal Area3D processing inheritance during dungeon traversal.
@@ -388,3 +394,47 @@ func _find_pair(pair_id: int) -> DungeonPairDefinition: # Resolves stable pair m
     if not _streamed_pairs.has(pair_id): # Detects an interaction request for metadata no longer represented in the bounded overworld stream.
         return null # Rejects stale door references instead of reconstructing from an unknown region coordinate.
     return _streamed_pairs[pair_id] # Returns the strongly typed deterministic pair metadata associated with the targeted exterior door.
+
+func _refresh_overworld_pairs_incremental(player_horizontal: Vector2, scheduler: GenerationScheduler) -> void: # Rebuilds the bounded set of pair regions whose endpoints are currently relevant to the exploring player.
+    var desired_pair_ids: Dictionary[int, bool] = {} # Records every pair that should remain streamed after this refresh without mutating dictionaries during iteration.
+    var centre_region: Vector2i = _get_region_coordinate(player_horizontal) # Finds the infinite owning region currently containing the player.
+    for offset_y: int in range(-SOURCE_REGION_SCAN_RADIUS, SOURCE_REGION_SCAN_RADIUS + 1): # Scans enough source-region rows to include endpoints from long-distance dungeon pairs.
+        if not await scheduler.checkpoint(): return
+        for offset_x: int in range(-SOURCE_REGION_SCAN_RADIUS, SOURCE_REGION_SCAN_RADIUS + 1): # Scans enough source-region columns around the current absolute player region.
+            if not await scheduler.checkpoint(): return
+            var region_coordinate: Vector2i = centre_region + Vector2i(offset_x, offset_y) # Converts the bounded local offset into one stable infinite overworld region coordinate.
+            var pair_id: int = _get_pair_id(region_coordinate) # Derives the unique practical pair identity directly from signed region coordinates.
+            if _streamed_pairs.has(pair_id): # Detects a pair whose expensive terrain-ground resolution has already been performed.
+                var existing_pair: DungeonPairDefinition = _streamed_pairs[pair_id] # Retrieves the existing deterministic metadata without regenerating it.
+                if _is_pair_within_distance(existing_pair, player_horizontal, PAIR_UNLOAD_DISTANCE): # Applies the larger retention distance to avoid load/unload oscillation.
+                    desired_pair_ids[pair_id] = true # Keeps the existing pair and both generated door nodes alive for this stream cycle.
+                continue # Avoids reconstructing an already streamed pair from its seed.
+            var new_pair: DungeonPairDefinition = await _build_stream_pair_for_region_incremental(region_coordinate, player_horizontal, scheduler) # Uses the special visible startup pair for its region and normal deterministic generation everywhere else.
+            if new_pair == null: # Detects a deterministic region whose two endpoints are currently outside the load neighbourhood.
+                continue # Leaves that infinite region represented only by its implicit seed until the player approaches either endpoint later.
+            desired_pair_ids[pair_id] = true # Marks the newly relevant pair before constructing its physical door nodes.
+            _stream_pair(new_pair) # Creates both exterior endpoints and registers their deterministic metadata in the bounded active stream.
+    var pairs_to_remove: Array[int] = [] # Collects stale pair identities so dictionaries are never erased while their keys are being iterated.
+    for pair_id: int in _streamed_pairs.keys(): # Examines every currently retained deterministic pair after evaluating the new neighbourhood.
+        if not await scheduler.checkpoint(): return
+        if not desired_pair_ids.has(pair_id): # Detects a pair whose endpoints are now safely outside the unload distance or source scan.
+            pairs_to_remove.append(pair_id) # Defers node release and dictionary mutation until key iteration has completed.
+    for pair_id: int in pairs_to_remove: # Removes every stale pair after the immutable iteration phase.
+        if not await scheduler.checkpoint(): return
+        _unstream_pair(pair_id) # Releases its generated doors and metadata while preserving the ability to reconstruct them identically later.
+
+func _build_stream_pair_for_region_incremental(region_coordinate: Vector2i, player_horizontal: Vector2, scheduler: GenerationScheduler) -> DungeonPairDefinition: # Chooses between the persistent visible startup pair and ordinary infinite-region pair generation.
+    if _starting_pair != null and region_coordinate == _starting_region_coordinate: # Detects the unique region whose ordinary pair was replaced at initial load.
+        if _is_pair_within_distance(_starting_pair, player_horizontal, PAIR_LOAD_DISTANCE): # Uses the normal endpoint-distance stream rule so the special pair still unloads cleanly when distant.
+            return _starting_pair # Reuses the exact cached startup metadata whenever either endpoint becomes relevant again.
+        return null # Leaves the special pair implicit while both of its endpoints are outside the active stream neighbourhood.
+    return await _build_pair_if_nearby_incremental(region_coordinate, player_horizontal, scheduler) # Uses unchanged procedural placement for every other infinite overworld region.
+
+func _build_pair_if_nearby_incremental(region: Vector2i, point: Vector2, _scheduler: GenerationScheduler) -> DungeonPairDefinition:
+    return _build_pair_if_nearby(region,point)
+
+func _run_refresh(point: Vector2, scheduler: GenerationScheduler):
+    scheduler.active_owner = self
+    scheduler.active_priority = 2
+    await _refresh_overworld_pairs_incremental(point,scheduler)
+    _refreshing = false

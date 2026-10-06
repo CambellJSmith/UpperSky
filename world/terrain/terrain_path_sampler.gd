@@ -9,14 +9,14 @@ const GRASS_CLEAR_RADIUS: float = 12.0 # Clears dense grass slightly beyond the 
 const GRASS_FADE_RADIUS: float = 27.0 # Lets grass return gradually at irregular path edges.
 const MAXIMUM_WEAR_DEPTH: float = 0.38 # Lowers the most travelled path centre by a restrained amount.
 
-static func get_wear_mask(position: Vector2) -> float: # Returns the visual and terrain-depression weight for one absolute world position.
+static func get_wilderness_wear_mask(position: Vector2) -> float: # Returns the visual and terrain-depression weight for one absolute world position.
     var vertical_distance: float = _distance_to_repeated_line(position.x - _get_vertical_meander(position.y)) # Measures distance to the nearest north-south meandering path.
     var horizontal_distance: float = _distance_to_repeated_line(position.y - _get_horizontal_meander(position.x)) # Measures distance to the nearest east-west meandering path.
     var vertical_mask: float = _get_axis_mask(vertical_distance, position.y, PATH_CORE_RADIUS, PATH_EDGE_RADIUS, 0.40) # Builds the softened north-south worn corridor.
     var horizontal_mask: float = _get_axis_mask(horizontal_distance, position.x, PATH_CORE_RADIUS, PATH_EDGE_RADIUS, 2.10) # Builds the softened east-west worn corridor.
     return maxf(vertical_mask, horizontal_mask) # Joins both families into one deterministic connected path network.
 
-static func get_grass_suppression(position: Vector2) -> float: # Returns how strongly dense ground grass should be removed around a path.
+static func get_wilderness_grass_suppression(position: Vector2) -> float: # Returns how strongly dense ground grass should be removed around a path.
     var vertical_distance: float = _distance_to_repeated_line(position.x - _get_vertical_meander(position.y)) # Measures distance to the nearest north-south grass-clearing corridor.
     var horizontal_distance: float = _distance_to_repeated_line(position.y - _get_horizontal_meander(position.x)) # Measures distance to the nearest east-west grass-clearing corridor.
     var vertical_mask: float = _get_axis_mask(vertical_distance, position.y, GRASS_CLEAR_RADIUS, GRASS_FADE_RADIUS, 0.40) # Creates a wider north-south vegetation clearing than the compacted soil.
@@ -24,7 +24,7 @@ static func get_grass_suppression(position: Vector2) -> float: # Returns how str
     return maxf(vertical_mask, horizontal_mask) # Uses the strongest nearby path so intersections remain completely grassless.
 
 static func get_height_offset(position: Vector2) -> float: # Returns the small negative terrain offset caused by repeated foot and cart traffic.
-    var wear_mask: float = get_wear_mask(position) # Samples the shared compacted-ground corridor at this world position.
+    var wear_mask: float = get_wilderness_wear_mask(position) # Samples the shared compacted-ground corridor at this world position.
     return -MAXIMUM_WEAR_DEPTH * pow(wear_mask, 1.45) # Concentrates most depression in the centre while leaving soft shoulders nearly unchanged.
 
 static func _distance_to_repeated_line(coordinate: float) -> float: # Measures distance to the nearest member of one evenly spaced path family.
@@ -52,3 +52,11 @@ static func _get_horizontal_meander(world_x: float) -> float: # Offsets east-wes
     var regional_curve: float = (sin(world_x * 0.00061 + 2.65) - sin(2.65)) * 118.0 # Adds a second slower drift that prevents mirrored path families.
     var local_curve: float = (sin(world_x * 0.00325 + 0.70) - sin(0.70)) * 44.0 # Adds smaller irregular bends suitable for a travelled trail.
     return broad_curve + regional_curve + local_curve # Combines every horizontal meander scale into one continuous offset.
+
+static func get_wear_mask(position: Vector2, terrain: InfiniteTerrain = null) -> float:
+    var base = get_wilderness_wear_mask(position)
+    return maxf(base,WorldPathNetwork.for_terrain(terrain).get_local_mask(position)) if terrain != null else base
+
+static func get_grass_suppression(position: Vector2, terrain: InfiniteTerrain = null) -> float:
+    var base = get_wilderness_grass_suppression(position)
+    return maxf(base,WorldPathNetwork.for_terrain(terrain).get_local_mask(position,true)) if terrain != null else base

@@ -23,15 +23,24 @@ const BOULDER_PATH_CLEAR_THRESHOLD: float = 0.78 # Removes blocking rocks from t
 const OCCUPANCY_CELL_SIZE: float = 8.0 # Spatially indexes accepted placements so overlap checks avoid scanning the complete chunk.
 const HASH_MAXIMUM: float = 2147483647.0 # Converts the positive hash range into a zero-to-one value.
 
+var _settlement_sampler: SettlementSampler
+var _camp_sampler: CampSampler
+
 var _terrain: InfiniteTerrain # Supplies exact terrain height and local water levels.
 var _forest_density_noise: FastNoiseLite # Creates kilometre-scale forest and open-land regions.
 var _forest_breakup_noise: FastNoiseLite # Breaks broad forests into natural clearings and denser stands.
+var _tree_species_noise: FastNoiseLite
+var _tree_moisture_noise: FastNoiseLite
 var _boulder_density_noise: FastNoiseLite # Creates coherent rocky areas instead of uniform scattering.
 var _exclusion_centre: Vector2 = Vector2.ZERO # Stores the current protected spawn or gameplay position.
 var _exclusion_radius: float = 0.0 # Stores the radius in which no generated decoration may appear.
 
 func _init(terrain: InfiniteTerrain) -> void: # Connects the sampler to the authoritative streamed world and builds density fields.
+    _settlement_sampler = SettlementSampler.for_terrain(terrain)
+    _camp_sampler = CampSampler.new(terrain)
     _terrain = terrain # Stores the public terrain and water query service used by gameplay and rendering.
+    _tree_species_noise = _create_noise(487,.0012,2,.5)
+    _tree_moisture_noise = _create_noise(491,.0018,2,.5)
     _forest_density_noise = _create_noise(401, 0.00072, 3, 0.54) # Creates broad forests spanning multiple chunks.
     _forest_breakup_noise = _create_noise(419, 0.0045, 2, 0.48) # Creates local clearings and irregular forest edges.
     _boulder_density_noise = _create_noise(443, 0.00135, 3, 0.52) # Creates broad rocky belts and boulder fields.
@@ -56,9 +65,11 @@ func _append_tree_placements(chunk_origin: Vector2, placements: Array[WorldDecor
     for cell_z: int in range(minimum_cell_z, maximum_cell_z + 1): # Visits every relevant global row.
         for cell_x: int in range(minimum_cell_x, maximum_cell_x + 1): # Visits every relevant global column.
             var candidate: Vector2 = _get_jittered_candidate(cell_x, cell_z, TREE_CELL_SIZE, TREE_JITTER_FRACTION, 11) # Generates one stable position inside the cell.
-            if not _is_inside_chunk(candidate, chunk_origin) or _is_excluded(candidate): # Rejects neighbouring ownership and the protected spawn clearing before expensive world sampling.
+            if BiomeProfile.vegetation_weight(candidate) < 0.5:
+                continue
+            if not _is_inside_chunk(candidate, chunk_origin) or _is_excluded(candidate,8.0): # Rejects neighbouring ownership and the protected spawn clearing before expensive world sampling.
                 continue # Leaves this candidate to its owning chunk or the protected clear area.
-            if TerrainPathSampler.get_grass_suppression(candidate) > TREE_PATH_CLEAR_THRESHOLD: # Detects trees whose trunk or canopy would intrude into a travelled corridor.
+            if TerrainPathSampler.get_grass_suppression(candidate,_terrain) > TREE_PATH_CLEAR_THRESHOLD: # Detects trees whose trunk or canopy would intrude into a travelled corridor.
                 continue # Keeps the complete worn path and its immediate shoulder visually open.
             var broad_density: float = _sample_normalized(_forest_density_noise, candidate) # Reads the kilometre-scale forest mask.
             var breakup_density: float = _sample_normalized(_forest_breakup_noise, candidate) # Reads local clearing variation.
@@ -67,7 +78,7 @@ func _append_tree_placements(chunk_origin: Vector2, placements: Array[WorldDecor
             var acceptance_roll: float = _hash01(cell_x, cell_z, 31) # Reuses one stable probability before and after altitude weighting.
             if acceptance_roll > acceptance_probability: # Rejects most candidates before terrain and water sampling.
                 continue # Saves several procedural height samples for objects that will never be shown.
-            var terrain_height: float = _terrain.get_height_at(candidate) # Reads the exact visible ground height only for density-approved candidates.
+            var terrain_height: float = _camp_sampler.ground_height(candidate) # Roots trees on the rendered terrain triangles.
             var altitude_weight: float = 1.0 - smoothstep(TREE_ALTITUDE_FADE_START, TREE_ALTITUDE_FADE_END, terrain_height) # Fades ordinary trees from exposed high mountains.
             if acceptance_roll > acceptance_probability * altitude_weight: # Applies altitude reduction without introducing a second random decision.
                 continue # Leaves extreme high terrain progressively clearer.
@@ -83,7 +94,9 @@ func _append_tree_placements(chunk_origin: Vector2, placements: Array[WorldDecor
             var yaw: float = _hash01(cell_x, cell_z, 59) * TAU # Rotates branch and canopy asymmetry around the trunk.
             var local_position: Vector3 = Vector3(candidate.x - chunk_origin.x, terrain_height, candidate.y - chunk_origin.y) # Converts the absolute candidate into chunk-local scene space.
             var basis: Basis = Basis(Vector3.UP, yaw).scaled(Vector3(width_scale, height_scale, width_scale)) # Applies stable rotation and nonuniform size variation.
-            placements.append(WorldDecorationPlacement.new(WorldDecorationPlacement.Kind.TREE, 0, Transform3D(basis, local_position))) # Adds one smooth shared-tree instance.
+            var species: int = _select_tree_species(candidate,cell_x,cell_z,terrain_height,water_level)
+            var form: int = mini(1,floori(_hash01(cell_x,cell_z,173)*2))
+            placements.append(WorldDecorationPlacement.new(WorldDecorationPlacement.Kind.TREE, species*2+form, Transform3D(basis, local_position))) # Adds one smooth shared-tree instance.
             _reserve_position(candidate, occupied_cells) # Adds the accepted tree to the local spatial index.
 
 func _append_boulder_placements(chunk_origin: Vector2, variant_count: int, placements: Array[WorldDecorationPlacement], occupied_cells: Dictionary) -> void: # Generates dense rounded boulder candidates from a second globally stable grid.
@@ -96,7 +109,7 @@ func _append_boulder_placements(chunk_origin: Vector2, variant_count: int, place
             var candidate: Vector2 = _get_jittered_candidate(cell_x, cell_z, BOULDER_CELL_SIZE, BOULDER_JITTER_FRACTION, 101) # Generates one stable rock position inside the cell.
             if not _is_inside_chunk(candidate, chunk_origin) or _is_excluded(candidate): # Rejects neighbouring ownership and the protected spawn clearing before expensive sampling.
                 continue # Leaves the candidate empty or owned by its correct chunk.
-            if TerrainPathSampler.get_grass_suppression(candidate) > BOULDER_PATH_CLEAR_THRESHOLD: # Detects rocks that would block the clearly travelled path centre.
+            if TerrainPathSampler.get_grass_suppression(candidate,_terrain) > BOULDER_PATH_CLEAR_THRESHOLD: # Detects rocks that would block the clearly travelled path centre.
                 continue # Preserves an unobstructed route while still allowing natural stones near its margins.
             var rocky_density: float = _sample_normalized(_boulder_density_noise, candidate) # Reads the broad rocky-region mask.
             var field_weight: float = smoothstep(0.34, 0.74, rocky_density) # Expands coherent boulder fields substantially.
@@ -143,7 +156,9 @@ func _sample_slope_variation(position: Vector2, centre_height: float) -> float: 
 func _is_inside_chunk(position: Vector2, chunk_origin: Vector2) -> bool: # Reports whether one absolute candidate belongs to the active chunk.
     return position.x >= chunk_origin.x and position.x < chunk_origin.x + TerrainConfiguration.CHUNK_SIZE and position.y >= chunk_origin.y and position.y < chunk_origin.y + TerrainConfiguration.CHUNK_SIZE # Uses half-open bounds to prevent duplicates at chunk edges.
 
-func _is_excluded(position: Vector2) -> bool: # Reports whether one candidate falls inside the protected gameplay area.
+func _is_excluded(position: Vector2, settlement_padding: float = 5.0) -> bool: # Reports whether one candidate falls inside the protected gameplay area.
+    if _camp_sampler.is_clearing(position) or _settlement_sampler.is_clearing(position,settlement_padding) or WayshrineSampler.for_terrain(_terrain).is_clearing(position,3):
+        return true
     if _exclusion_radius <= 0.0: # Detects whether any exclusion has been configured.
         return false # Allows all candidates when no protected area exists.
     return position.distance_squared_to(_exclusion_centre) < _exclusion_radius * _exclusion_radius # Uses squared distance for a stable circular protected area.
@@ -194,3 +209,116 @@ func _create_noise(seed_offset: int, frequency: float, octaves: int, gain: float
     noise.fractal_gain = gain # Controls the contribution of finer layers.
     noise.fractal_lacunarity = 2.0 # Doubles frequency at each finer layer.
     return noise # Returns the configured repeatable field.
+func _select_tree_species(point: Vector2, x: int, z: int, height: float, water: float) -> int:
+    var roll: float = _hash01(x,z,163)
+    if roll < .035:
+        return TreeGeometry.Species.SNAG
+    var moisture: float = _sample_normalized(_tree_moisture_noise,point)
+    if height-water < 32.0 and moisture > .45 and roll < .30:
+        return TreeGeometry.Species.WILLOW
+    if roll < .10:
+        return TreeGeometry.Species.WIND_BENT
+    var grove: float = _sample_normalized(_tree_species_noise,point)
+    var conifer: float = smoothstep(700.0,1600.0,height)*.35 + (.35 if grove > .57 else .12)
+    if roll < conifer+.1:
+        return TreeGeometry.Species.PINE if _hash01(x,z,167) < .48 else TreeGeometry.Species.SPRUCE
+    if grove < .43:
+        return TreeGeometry.Species.BIRCH if roll < .72 else TreeGeometry.Species.OAK
+    if grove > .64:
+        return TreeGeometry.Species.BEECH if roll < .78 else TreeGeometry.Species.BIRCH
+    return TreeGeometry.Species.OAK if roll < .78 else TreeGeometry.Species.BEECH
+
+func _append_tree_incremental(chunk_origin: Vector2, placements: Array[WorldDecorationPlacement], occupied_cells: Dictionary, scheduler: GenerationScheduler) -> void: # Generates dense tree candidates from a globally stable jittered grid.
+    var minimum_cell_x: int = floori(chunk_origin.x / TREE_CELL_SIZE) # Finds the first global tree cell touching the chunk.
+    var maximum_cell_x: int = floori((chunk_origin.x + TerrainConfiguration.CHUNK_SIZE - 0.001) / TREE_CELL_SIZE) # Finds the final global tree cell touching the chunk.
+    var minimum_cell_z: int = floori(chunk_origin.y / TREE_CELL_SIZE) # Finds the first global tree row touching the chunk.
+    var maximum_cell_z: int = floori((chunk_origin.y + TerrainConfiguration.CHUNK_SIZE - 0.001) / TREE_CELL_SIZE) # Finds the final global tree row touching the chunk.
+    for cell_z: int in range(minimum_cell_z, maximum_cell_z + 1): # Visits every relevant global row.
+        if not await scheduler.checkpoint(): return
+        for cell_x: int in range(minimum_cell_x, maximum_cell_x + 1): # Visits every relevant global column.
+            if not await scheduler.checkpoint(): return
+            var candidate: Vector2 = _get_jittered_candidate(cell_x, cell_z, TREE_CELL_SIZE, TREE_JITTER_FRACTION, 11) # Generates one stable position inside the cell.
+            if BiomeProfile.vegetation_weight(candidate) < 0.5:
+                continue
+            if not _is_inside_chunk(candidate, chunk_origin) or _is_excluded(candidate,8.0): # Rejects neighbouring ownership and the protected spawn clearing before expensive world sampling.
+                continue # Leaves this candidate to its owning chunk or the protected clear area.
+            if TerrainPathSampler.get_grass_suppression(candidate,_terrain) > TREE_PATH_CLEAR_THRESHOLD: # Detects trees whose trunk or canopy would intrude into a travelled corridor.
+                continue # Keeps the complete worn path and its immediate shoulder visually open.
+            var broad_density: float = _sample_normalized(_forest_density_noise, candidate) # Reads the kilometre-scale forest mask.
+            var breakup_density: float = _sample_normalized(_forest_breakup_noise, candidate) # Reads local clearing variation.
+            var forest_weight: float = smoothstep(0.28, 0.70, broad_density) * lerpf(0.58, 1.0, breakup_density) # Produces broad dense stands while retaining irregular clearings.
+            var acceptance_probability: float = TREE_BACKGROUND_PROBABILITY + forest_weight * TREE_FOREST_PROBABILITY # Keeps background woodland and strongly fills forest regions.
+            var acceptance_roll: float = _hash01(cell_x, cell_z, 31) # Reuses one stable probability before and after altitude weighting.
+            if acceptance_roll > acceptance_probability: # Rejects most candidates before terrain and water sampling.
+                continue # Saves several procedural height samples for objects that will never be shown.
+            var terrain_height: float = _camp_sampler.ground_height(candidate) # Roots trees on the rendered terrain triangles.
+            var altitude_weight: float = 1.0 - smoothstep(TREE_ALTITUDE_FADE_START, TREE_ALTITUDE_FADE_END, terrain_height) # Fades ordinary trees from exposed high mountains.
+            if acceptance_roll > acceptance_probability * altitude_weight: # Applies altitude reduction without introducing a second random decision.
+                continue # Leaves extreme high terrain progressively clearer.
+            var water_level: float = _terrain.get_water_level_at(candidate) # Reads the deterministic local water band.
+            if terrain_height <= water_level + TREE_MINIMUM_WATER_CLEARANCE: # Uses a conservative height clearance instead of the more expensive rendered-water interpolation query.
+                continue # Keeps every trunk visibly rooted on dry land.
+            if _sample_slope_variation(candidate, terrain_height) > TREE_MAXIMUM_SLOPE_VARIATION: # Rejects steep local terrain using two diagonal samples rather than four cardinal samples.
+                continue # Prevents tilted-looking or floating tree bases.
+            if _is_too_close(candidate, occupied_cells, TREE_MINIMUM_SPACING): # Enforces local separation through the spatial occupancy index.
+                continue # Prevents intersecting trunks and the most obvious canopy overlap.
+            var width_scale: float = lerpf(0.72, 1.20, _hash01(cell_x, cell_z, 47)) # Varies trunk width and canopy spread while permitting more compact dense trees.
+            var height_scale: float = lerpf(0.76, 1.34, _hash01(cell_x, cell_z, 53)) # Varies complete tree height independently.
+            var yaw: float = _hash01(cell_x, cell_z, 59) * TAU # Rotates branch and canopy asymmetry around the trunk.
+            var local_position: Vector3 = Vector3(candidate.x - chunk_origin.x, terrain_height, candidate.y - chunk_origin.y) # Converts the absolute candidate into chunk-local scene space.
+            var basis: Basis = Basis(Vector3.UP, yaw).scaled(Vector3(width_scale, height_scale, width_scale)) # Applies stable rotation and nonuniform size variation.
+            var species: int = _select_tree_species(candidate,cell_x,cell_z,terrain_height,water_level)
+            var form: int = mini(1,floori(_hash01(cell_x,cell_z,173)*2))
+            placements.append(WorldDecorationPlacement.new(WorldDecorationPlacement.Kind.TREE, species*2+form, Transform3D(basis, local_position))) # Adds one smooth shared-tree instance.
+            _reserve_position(candidate, occupied_cells) # Adds the accepted tree to the local spatial index.
+
+func _append_boulder_incremental(chunk_origin: Vector2, variant_count: int, placements: Array[WorldDecorationPlacement], occupied_cells: Dictionary, scheduler: GenerationScheduler) -> void: # Generates dense rounded boulder candidates from a second globally stable grid.
+    var minimum_cell_x: int = floori(chunk_origin.x / BOULDER_CELL_SIZE) # Finds the first global boulder cell touching the chunk.
+    var maximum_cell_x: int = floori((chunk_origin.x + TerrainConfiguration.CHUNK_SIZE - 0.001) / BOULDER_CELL_SIZE) # Finds the final global boulder cell touching the chunk.
+    var minimum_cell_z: int = floori(chunk_origin.y / BOULDER_CELL_SIZE) # Finds the first global boulder row touching the chunk.
+    var maximum_cell_z: int = floori((chunk_origin.y + TerrainConfiguration.CHUNK_SIZE - 0.001) / BOULDER_CELL_SIZE) # Finds the final global boulder row touching the chunk.
+    for cell_z: int in range(minimum_cell_z, maximum_cell_z + 1): # Visits every relevant global row.
+        if not await scheduler.checkpoint(): return
+        for cell_x: int in range(minimum_cell_x, maximum_cell_x + 1): # Visits every relevant global column.
+            if not await scheduler.checkpoint(): return
+            var candidate: Vector2 = _get_jittered_candidate(cell_x, cell_z, BOULDER_CELL_SIZE, BOULDER_JITTER_FRACTION, 101) # Generates one stable rock position inside the cell.
+            if not _is_inside_chunk(candidate, chunk_origin) or _is_excluded(candidate): # Rejects neighbouring ownership and the protected spawn clearing before expensive sampling.
+                continue # Leaves the candidate empty or owned by its correct chunk.
+            if TerrainPathSampler.get_grass_suppression(candidate,_terrain) > BOULDER_PATH_CLEAR_THRESHOLD: # Detects rocks that would block the clearly travelled path centre.
+                continue # Preserves an unobstructed route while still allowing natural stones near its margins.
+            var rocky_density: float = _sample_normalized(_boulder_density_noise, candidate) # Reads the broad rocky-region mask.
+            var field_weight: float = smoothstep(0.34, 0.74, rocky_density) # Expands coherent boulder fields substantially.
+            var acceptance_probability: float = BOULDER_BACKGROUND_PROBABILITY + field_weight * BOULDER_FIELD_PROBABILITY # Combines dense rocky belts with a visible background population.
+            if _hash01(cell_x, cell_z, 113) > acceptance_probability: # Rejects candidates before terrain and water work.
+                continue # Saves procedural sampling for rocks that will not be rendered.
+            var terrain_height: float = _terrain.get_height_at(candidate) # Reads the exact visible ground elevation.
+            var water_level: float = _terrain.get_water_level_at(candidate) # Reads the local water band.
+            if terrain_height <= water_level + BOULDER_MINIMUM_WATER_CLEARANCE: # Uses conservative clearance instead of the more expensive rendered-water interpolation query.
+                continue # Keeps generated boulders on visible land.
+            if _sample_slope_variation(candidate, terrain_height) > BOULDER_MAXIMUM_SLOPE_VARIATION: # Rejects only the roughest local footprints.
+                continue # Prevents severely floating rocks on abrupt terrain discontinuities.
+            if _is_too_close(candidate, occupied_cells, BOULDER_OBJECT_SPACING): # Prevents rocks from intersecting trunks or neighbouring boulders.
+                continue # Leaves sufficient visible separation.
+            var scale_x: float = lerpf(0.95, 2.85, _hash01(cell_x, cell_z, 127)) # Includes smaller common rocks as well as substantial boulders.
+            var scale_y: float = lerpf(0.70, 2.05, _hash01(cell_x, cell_z, 131)) # Varies vertical mass independently.
+            var scale_z: float = lerpf(0.90, 2.70, _hash01(cell_x, cell_z, 137)) # Creates nonuniform broad silhouettes.
+            var yaw: float = _hash01(cell_x, cell_z, 139) * TAU # Rotates the irregular shared mesh around the vertical axis.
+            var pitch: float = lerpf(-0.16, 0.16, _hash01(cell_x, cell_z, 149)) # Adds restrained natural settling tilt.
+            var roll: float = lerpf(-0.16, 0.16, _hash01(cell_x, cell_z, 151)) # Adds independent tilt along the other horizontal axis.
+            var basis: Basis = Basis(Vector3.UP, yaw) # Starts with the primary random world rotation.
+            basis = basis.rotated(Vector3.RIGHT, pitch) # Applies restrained forward or backward settling.
+            basis = basis.rotated(Vector3.FORWARD, roll) # Applies restrained side settling.
+            basis = basis.scaled(Vector3(scale_x, scale_y, scale_z)) # Applies the complete irregular instance size.
+            var embedded_height: float = terrain_height + scale_y * 0.44 # Places part of the rounded volume below ground so it appears naturally embedded.
+            var local_position: Vector3 = Vector3(candidate.x - chunk_origin.x, embedded_height, candidate.y - chunk_origin.y) # Converts the absolute candidate into chunk-local scene space.
+            var variant: int = floori(_hash01(cell_x, cell_z, 157) * float(variant_count)) # Selects one shared smooth boulder silhouette.
+            placements.append(WorldDecorationPlacement.new(WorldDecorationPlacement.Kind.BOULDER, mini(variant, variant_count - 1), Transform3D(basis, local_position))) # Adds the rounded boulder placement.
+            _reserve_position(candidate, occupied_cells) # Adds the accepted rock to the local spatial index.
+
+func sample_chunk_incremental(chunk_coordinate: Vector2i, boulder_variant_count: int, scheduler: GenerationScheduler) -> Array[WorldDecorationPlacement]: # Generates every accepted smooth decoration placement for one chunk.
+    var placements: Array[WorldDecorationPlacement] = [] # Stores the complete deterministic result in stable generation order.
+    var occupied_cells: Dictionary = {} # Spatially indexes accepted objects so dense overlap tests remain close to constant time.
+    var chunk_origin: Vector2 = Vector2(float(chunk_coordinate.x), float(chunk_coordinate.y)) * TerrainConfiguration.CHUNK_SIZE # Calculates the absolute back-left chunk corner.
+    await _append_tree_incremental(chunk_origin, placements, occupied_cells, scheduler) # Generates forest candidates first so trunks retain their required spacing.
+    await _append_boulder_incremental(chunk_origin, maxi(boulder_variant_count, 1), placements, occupied_cells, scheduler) # Adds rounded rocks around the accepted trees.
+    return placements # Returns deterministic chunk-local transforms for rendering and collision.

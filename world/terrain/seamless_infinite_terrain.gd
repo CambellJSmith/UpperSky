@@ -17,17 +17,21 @@ var _seamless_terrain_bottom_right_height: float = 0.0 # Caches terrain elevatio
 func _ready() -> void: # Initializes ordinary infinite-terrain resources and then replaces generation services before any player-driven chunk construction occurs.
     super() # Builds the established materials and baseline services while preserving all inherited streaming setup assumptions.
     _height_sampler = SeamlessTerrainHeightSampler.new() # Replaces terrain sampling so coastal and underwater shaping use the continuous water profile.
-    _mesh_builder = TerrainMeshBuilder.new(_height_sampler, _terrain_material) # Rebinds visible terrain generation to the seamless terrain-height sampler.
+    _mesh_builder = TerrainMeshBuilder.new(_height_sampler, _terrain_material,self) # Rebinds visible terrain generation to the seamless terrain-height sampler.
     _water_level_sampler = SeamlessTerrainWaterLevelSampler.new() # Replaces discontinuous geological water bands with the shared continuous world-space water function.
     _water_mesh_builder = SeamlessTerrainWaterMeshBuilder.new(_height_sampler, _water_level_sampler, _water_material) # Replaces stepped water cells and vertical curtains with shared-vertex continuous top surfaces.
 
 func get_water_level_at(world_position: Vector2) -> float: # Returns the exact triangle-interpolated water elevation rendered at one stable world-space horizontal position.
     _update_seamless_water_query_cache(world_position) # Populates shared water and terrain vertex samples only when the query crosses a globally aligned water cell boundary.
+    if BiomeProfile.is_waterfall_gap(world_position):
+        return BiomeProfile.waterfall_pool_level(world_position)
     return _sample_cached_water_height(world_position) # Interpolates the same water triangle and diagonal used by the seamless water mesh builder.
 
 func has_water_at(world_position: Vector2) -> bool: # Reports whether the seamless rendered water surface occupies one stable world-space horizontal position.
     _update_seamless_water_query_cache(world_position) # Ensures the exact four terrain and water vertex samples for the active rendered cell are cached.
     var rendered_water_height: float = _sample_cached_water_height(world_position) # Reconstructs the exact continuous water triangle height at the requested horizontal coordinate.
+    if BiomeProfile.is_waterfall_gap(world_position):
+        rendered_water_height = BiomeProfile.waterfall_pool_level(world_position)
     var rendered_terrain_height: float = _sample_cached_terrain_height(world_position) # Reconstructs the exact terrain triangle height using the same grid and diagonal.
     return rendered_terrain_height < rendered_water_height - SEAMLESS_WATER_PRESENCE_EPSILON # Matches mesh clipping so gameplay water exists only where the rendered top surface lies meaningfully above terrain.
 
@@ -46,10 +50,10 @@ func _update_seamless_water_query_cache(world_position: Vector2) -> void: # Cach
     _seamless_water_top_right_height = _water_level_sampler.sample_water_level(cell_right_x, cell_origin_z) # Samples the exact continuous water function at the back-right shared vertex.
     _seamless_water_bottom_left_height = _water_level_sampler.sample_water_level(cell_origin_x, cell_forward_z) # Samples the exact continuous water function at the forward-left shared vertex.
     _seamless_water_bottom_right_height = _water_level_sampler.sample_water_level(cell_right_x, cell_forward_z) # Samples the exact continuous water function at the forward-right shared vertex.
-    _seamless_terrain_top_left_height = _height_sampler.sample_height(cell_origin_x, cell_origin_z) # Samples the exact terrain function at the back-left shared vertex used by mesh clipping.
-    _seamless_terrain_top_right_height = _height_sampler.sample_height(cell_right_x, cell_origin_z) # Samples the exact terrain function at the back-right shared vertex used by mesh clipping.
-    _seamless_terrain_bottom_left_height = _height_sampler.sample_height(cell_origin_x, cell_forward_z) # Samples the exact terrain function at the forward-left shared vertex used by mesh clipping.
-    _seamless_terrain_bottom_right_height = _height_sampler.sample_height(cell_right_x, cell_forward_z) # Samples the exact terrain function at the forward-right shared vertex used by mesh clipping.
+    _seamless_terrain_top_left_height = get_height_at(Vector2(cell_origin_x, cell_origin_z)) # Samples the exact terrain function at the back-left shared vertex used by mesh clipping.
+    _seamless_terrain_top_right_height = get_height_at(Vector2(cell_right_x, cell_origin_z)) # Samples the exact terrain function at the back-right shared vertex used by mesh clipping.
+    _seamless_terrain_bottom_left_height = get_height_at(Vector2(cell_origin_x, cell_forward_z)) # Samples the exact terrain function at the forward-left shared vertex used by mesh clipping.
+    _seamless_terrain_bottom_right_height = get_height_at(Vector2(cell_right_x, cell_forward_z)) # Samples the exact terrain function at the forward-right shared vertex used by mesh clipping.
 
 func _sample_cached_water_height(world_position: Vector2) -> float: # Interpolates continuous water height across the active triangle exactly as the water mesh builder does.
     return _sample_cached_cell_height(world_position, _seamless_water_top_left_height, _seamless_water_top_right_height, _seamless_water_bottom_left_height, _seamless_water_bottom_right_height) # Reuses one diagonal-aware interpolation function for the cached water surface.

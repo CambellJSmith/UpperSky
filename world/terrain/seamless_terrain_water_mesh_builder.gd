@@ -5,10 +5,13 @@ const SEAMLESS_WATER_UV_SCALE: float = 0.0078125 # Keeps water texture coordinat
 const SEAMLESS_WATER_CLIP_EPSILON: float = 0.02 # Matches gameplay shoreline tolerance while preventing numerically marginal water slivers.
 const SEAMLESS_MINIMUM_TRIANGLE_AREA_SQUARED: float = 0.000001 # Rejects collapsed shoreline triangles before they reach rendering.
 
-func _init(height_sampler: TerrainHeightSampler, water_level_sampler: TerrainWaterLevelSampler, water_material: StandardMaterial3D) -> void: # Forwards the coordinated terrain, water, and material services into the established builder state.
+func _init(height_sampler: TerrainHeightSampler, water_level_sampler: TerrainWaterLevelSampler, water_material: Material) -> void: # Forwards the coordinated terrain, water, and material services into the established builder state.
     super(height_sampler, water_level_sampler, water_material) # Initializes the inherited authoritative service references without duplicating state.
 
 func build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh: # Generates one continuous terrain-clipped water surface for an absolute world chunk.
+    return mesh_from_arrays(build_chunk_arrays(chunk_coordinate))
+
+func build_chunk_arrays(chunk_coordinate: Vector2i) -> Array:
     var water_resolution: int = TerrainConfiguration.WATER_RESOLUTION # Reads the shared water grid resolution used by rendering and gameplay interpolation.
     var cell_count: int = water_resolution - 1 # Calculates the number of water cells represented along each chunk axis.
     var vertex_spacing: float = TerrainConfiguration.CHUNK_SIZE / float(cell_count) # Calculates the exact stable-world spacing shared by neighbouring water vertices.
@@ -48,14 +51,18 @@ func build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh: # Generates one 
             var water_bottom_right: Vector3 = Vector3(local_right, water_height_cache[bottom_right_index], local_forward) # Builds the continuous water surface at the shared forward-right grid vertex.
             _append_clipped_seamless_surface_triangle(terrain_top_left, terrain_top_right, terrain_bottom_left, water_top_left, water_top_right, water_bottom_left, chunk_world_x, chunk_world_z, vertices, normals, uvs) # Clips the first cell triangle against terrain while retaining the exact shared water surface.
             _append_clipped_seamless_surface_triangle(terrain_top_right, terrain_bottom_right, terrain_bottom_left, water_top_right, water_bottom_right, water_bottom_left, chunk_world_x, chunk_world_z, vertices, normals, uvs) # Clips the second cell triangle using the same diagonal as terrain and gameplay interpolation.
-    var water_mesh: ArrayMesh = ArrayMesh.new() # Creates a valid empty return mesh even when the complete chunk is dry.
     if vertices.is_empty(): # Detects a chunk with no terrain lying below the continuous water surface.
-        return water_mesh # Returns the empty mesh so the terrain chunk can omit its water renderer.
+        return []
     var arrays: Array = [] # Creates the fixed channel container expected by ArrayMesh surface construction.
     arrays.resize(Mesh.ARRAY_MAX) # Allocates every standard mesh channel slot before assigning populated channels.
     arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array(vertices) # Uploads all clipped continuous surface positions.
     arrays[Mesh.ARRAY_NORMAL] = PackedVector3Array(normals) # Uploads geometry-derived surface normals matching local water slope.
     arrays[Mesh.ARRAY_TEX_UV] = PackedVector2Array(uvs) # Uploads stable-world water texture coordinates without chunk seams.
+    return arrays
+
+func mesh_from_arrays(arrays: Array) -> ArrayMesh:
+    var water_mesh = ArrayMesh.new()
+    if arrays.is_empty(): return water_mesh
     water_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays) # Creates one surface containing only the continuous top water geometry.
     water_mesh.surface_set_material(0, _water_material) # Applies the established shared transparent water material to the seamless surface.
     return water_mesh # Returns the completed water mesh containing no vertical transition curtains or side faces.
@@ -63,6 +70,12 @@ func build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh: # Generates one 
 func _append_clipped_seamless_surface_triangle(terrain_a: Vector3, terrain_b: Vector3, terrain_c: Vector3, water_a: Vector3, water_b: Vector3, water_c: Vector3, chunk_world_x: float, chunk_world_z: float, vertices: Array[Vector3], normals: Array[Vector3], uvs: Array[Vector2]) -> void: # Clips one sloped water triangle against the corresponding linearly interpolated terrain triangle.
     var terrain_points: Array[Vector3] = [terrain_a, terrain_b, terrain_c] # Stores terrain vertices in the exact triangle order shared by ground rendering.
     var water_points: Array[Vector3] = [water_a, water_b, water_c] # Stores corresponding continuous water vertices in the same horizontal positions.
+    var midpoint: Vector2 = Vector2(chunk_world_x + (water_a.x + water_b.x + water_c.x) / 3.0, chunk_world_z + (water_a.z + water_b.z + water_c.z) / 3.0)
+    if BiomeProfile.is_waterfall_gap(midpoint):
+        # Render the plunge pool instead of an inclined sheet obscuring the cascade.
+        var pool_level: float = BiomeProfile.waterfall_pool_level(midpoint)
+        for point_index: int in range(water_points.size()):
+            water_points[point_index].y = pool_level
     var signed_depths: Array[float] = [] # Stores water-minus-terrain clearance after shoreline tolerance at each triangle vertex.
     for point_index: int in range(3): # Calculates the authoritative submerged classification value for every triangle vertex.
         signed_depths.append(water_points[point_index].y - terrain_points[point_index].y - SEAMLESS_WATER_CLIP_EPSILON) # Treats positive clearance as visible water and zero as the exact clipped shoreline boundary.
@@ -93,12 +106,12 @@ func _append_surface_triangle(point_a: Vector3, point_b: Vector3, point_c: Vecto
     var surface_cross: Vector3 = (adjusted_b - point_a).cross(adjusted_c - point_a) # Calculates triangle orientation and twice-area from the current winding.
     if surface_cross.length_squared() <= SEAMLESS_MINIMUM_TRIANGLE_AREA_SQUARED: # Detects a collapsed shoreline triangle before normal normalization.
         return # Omits degenerate geometry that could produce invalid normals or rendering artifacts.
-    if surface_cross.y < 0.0: # Detects downward winding relative to the expected water top surface.
+    if surface_cross.y > 0.0: # Godot uses clockwise front faces, so the top-facing triangle has a downward cross product.
         var swap_point: Vector3 = adjusted_b # Temporarily stores the second point while reversing the two trailing vertices.
         adjusted_b = adjusted_c # Moves the original third point into the second position to reverse winding.
-        adjusted_c = swap_point # Moves the original second point into the third position to complete the upward winding correction.
-        surface_cross = (adjusted_b - point_a).cross(adjusted_c - point_a) # Recalculates the surface normal after the winding correction.
-    var surface_normal: Vector3 = surface_cross.normalized() # Converts the valid upward area vector into the smooth local water-plane normal.
+        adjusted_c = swap_point # Moves the original second point into the third position to complete clockwise top-face winding.
+        surface_cross = (adjusted_b - point_a).cross(adjusted_c - point_a) # Recalculates the area vector after the winding correction.
+    var surface_normal: Vector3 = -surface_cross.normalized() # Negates the clockwise area vector to produce an upward water-plane normal.
     vertices.append(point_a) # Stores the first continuous water vertex.
     vertices.append(adjusted_b) # Stores the winding-corrected second continuous water vertex.
     vertices.append(adjusted_c) # Stores the winding-corrected third continuous water vertex.

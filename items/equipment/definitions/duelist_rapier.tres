@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="EquipmentDefinition" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://items/equipment/equipment_definition.gd" id="1_definition"]
+[ext_resource type="PackedScene" path="res://items/equipment/scenes/duelist_rapier.tscn" id="2_scene"]
+
+[resource]
+script = ExtResource("1_definition")
+item_id = &"duelist_rapier"
+display_name = "Duelist Rapier"
+category = 0
+unit_weight = 1.6
+held_scene = ExtResource("2_scene")
+reach = 2.7
+primary_cooldown = 0.48
+damage = 23.0
+tool_power = 0.0
+tool_tags = PackedStringArray("melee", "blade", "sword")

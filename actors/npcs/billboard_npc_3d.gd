@@ -6,7 +6,25 @@ const BILLBOARD_VISUAL_PATH: NodePath = NodePath("BillboardVisual") # Defines th
 
 @onready var _billboard_visual: MeshInstance3D = get_node_or_null(BILLBOARD_VISUAL_PATH) as MeshInstance3D # Resolves the one required billboard mesh used for NPC character presentation.
 
+var affection: AffectionState = AffectionState.new()
+func get_affection() -> float: return affection.get_score()
+func set_affection(value: float): affection.set_score(value)
+func change_affection(amount: float): affection.change_score(amount)
+
+var combat: NpcCombat
+var health: DamageableHealth
+func get_health_component() -> DamageableHealth: return health
+func receive_equipment_hit(hit: EquipmentHit): health.receive_equipment_hit(hit)
+
 func _ready() -> void: # Registers the NPC and validates that its scene obeys the billboard-only character presentation contract.
+    health = DamageableHealth.new()
+    health.name = "Health"
+    add_child(health)
+    combat = NpcCombat.new()
+    combat.name = "Combat"
+    add_child(combat)
+    combat.configure(self,affection,health.state)
+    health.died.connect(func(): velocity = Vector3.ZERO; set_physics_process(false))
     add_to_group(NPC_GROUP_NAME) # Marks every actor inheriting this base as an NPC for world-management and future gameplay queries.
     assert(_billboard_visual != null, "BillboardNpc3D requires a MeshInstance3D child named BillboardVisual.") # Fails development builds when an NPC scene omits the required billboard mesh presentation node.
 
@@ -29,3 +47,19 @@ func configure_billboard(texture: Texture2D, physical_size: Vector2) -> void: # 
 
 func get_billboard_visual() -> MeshInstance3D: # Returns the required billboard mesh for small animation offsets without exposing replacement 3D model paths.
     return _billboard_visual # Provides controlled access to the established texture-backed character presentation node.
+
+func is_in_combat() -> bool: return combat != null and combat.active
+func _physics_process(delta: float):
+    if health.is_dead(): return
+    if combat.tick(delta):
+        var direction = combat.target.global_position-global_position
+        direction.y = 0
+        direction = direction.normalized()
+        var close = global_position.distance_to(combat.target.global_position) <= NpcCombat.REACH*.85
+        velocity.x = 0 if close or combat.attacking else direction.x*3.0
+        velocity.z = 0 if close or combat.attacking else direction.z*3.0
+    else:
+        velocity.x = 0
+        velocity.z = 0
+    velocity.y = 0 if is_on_floor() else maxf(-20,velocity.y-24*delta)
+    move_and_slide()

@@ -4,12 +4,15 @@ class_name InfiniteTerrain # Makes the terrain controller available to the game 
 const WATER_PRESENCE_EPSILON: float = 0.02 # Matches shoreline clipping tolerance when deciding whether a real water volume exists.
 const INVALID_WATER_CELL: Vector2i = Vector2i(2_147_483_647, 2_147_483_647) # Forces the first exact water query to populate its cell cache.
 
+const HEIGHT_CACHE_LIMIT = 32768
+var _height_cache: Dictionary = {}
+var _building: Dictionary = {}
 var _height_sampler: TerrainHeightSampler # Supplies one continuous deterministic height function for every terrain chunk.
 var _mesh_builder: TerrainMeshBuilder # Converts height samples into seam-consistent renderable ground meshes.
 var _terrain_material: StandardMaterial3D # Shades generated ground vertices using their authored terrain colours.
 var _water_level_sampler: TerrainWaterLevelSampler # Selects flat local water elevations corresponding to the world's major terrain tiers.
 var _water_mesh_builder: TerrainWaterMeshBuilder # Clips local water surfaces against terrain and seals transitions between different levels.
-var _water_material: StandardMaterial3D # Shades all generated water surfaces with one shared transparent material.
+var _water_material: Material # Shades all generated water surfaces with one shared transparent material.
 var _player: Node3D # Identifies the moving world subject that controls streaming.
 var _rebase_root: Node3D # Owns active world entities that must remain aligned when the floating origin moves.
 var _world_origin_offset: Vector2 = Vector2.ZERO # Tracks the absolute world coordinate represented by local scene origin.
@@ -28,12 +31,21 @@ var _water_query_bottom_right_height: float = 0.0 # Caches the terrain height at
 func _ready() -> void: # Creates reusable terrain and water resources before the game composition root initializes the player.
     _height_sampler = TerrainHeightSampler.new() # Creates the deterministic world-height service.
     _terrain_material = _create_terrain_material() # Creates one shared material for every streamed ground chunk.
-    _mesh_builder = TerrainMeshBuilder.new(_height_sampler, _terrain_material) # Creates the isolated ground mesh-construction service.
+    _mesh_builder = TerrainMeshBuilder.new(_height_sampler, _terrain_material,self) # Creates the isolated ground mesh-construction service.
     _water_level_sampler = TerrainWaterLevelSampler.new() # Creates the tier-aware flat water-level service.
     _water_material = _create_water_material() # Creates one shared transparent material for every streamed water surface.
     _water_mesh_builder = TerrainWaterMeshBuilder.new(_height_sampler, _water_level_sampler, _water_material) # Creates the clipped water mesh-construction service.
 
-func initialize(player: Node3D, rebase_root: Node3D) -> void: # Connects terrain streaming, active entities, and safe initial spawn geometry.
+func initialize(player: Node3D, rebase_root: Node3D) -> void:
+    # Timing scopes are inactive until a console recording begins.
+    if not RuntimeProfiler.recording:
+        _profile_initialize(player, rebase_root)
+        return
+    var _profile_token = RuntimeProfiler.begin("terrain.initialize")
+    _profile_initialize(player, rebase_root)
+    RuntimeProfiler.end(_profile_token)
+
+func _profile_initialize(player: Node3D, rebase_root: Node3D) -> void: # Connects terrain streaming, active entities, and safe initial spawn geometry.
     _player = player # Stores the tracked player without introducing global state or signals.
     _rebase_root = rebase_root # Stores the active-entity root used by floating-origin adjustments.
     _current_chunk_coordinate = _get_chunk_coordinate(_get_player_world_position()) # Calculates the player's initial absolute world-grid coordinate.
@@ -46,7 +58,16 @@ func _physics_process(_delta: float) -> void: # Keeps active entities close to l
         return # Skips floating-origin work until terrain initialization is complete.
     _rebase_world_if_needed() # Repositions active entities and loaded chunks before transforms lose useful precision.
 
-func _process(_delta: float) -> void: # Advances bounded terrain and water streaming work each rendered frame.
+func _process(_delta: float) -> void:
+    # Timing scopes are inactive until a console recording begins.
+    if not RuntimeProfiler.recording:
+        _profile__process(_delta)
+        return
+    var _profile_token = RuntimeProfiler.begin("terrain.stream")
+    _profile__process(_delta)
+    RuntimeProfiler.end(_profile_token)
+
+func _profile__process(_delta: float) -> void: # Advances bounded terrain and water streaming work each rendered frame.
     if _player == null: # Waits until the game composition root provides a player reference.
         return # Skips streaming without a tracked subject.
     var player_chunk_coordinate: Vector2i = _get_chunk_coordinate(_get_player_world_position()) # Finds the player's current absolute world-grid coordinate.
@@ -56,7 +77,11 @@ func _process(_delta: float) -> void: # Advances bounded terrain and water strea
     _build_pending_chunks() # Generates a fixed number of missing terrain and water chunks without blocking the full frame.
 
 func get_height_at(world_position: Vector2) -> float: # Exposes the authoritative ground height field to spawning and future world systems.
-    return _height_sampler.sample_height(world_position.x, world_position.y) # Samples the same function used by every generated terrain mesh vertex.
+    if _height_cache.has(world_position): return _height_cache[world_position]
+    var height = _height_sampler.sample_height(world_position.x,world_position.y)
+    if _height_cache.size() >= HEIGHT_CACHE_LIMIT: _height_cache.clear()
+    _height_cache[world_position] = height
+    return height
 
 func get_water_level_at(world_position: Vector2) -> float: # Exposes the exact flat water-cell level used by rendering and gameplay systems.
     _update_water_query_cache(world_position) # Populates the active rendered-cell data only when the query crosses a cell boundary.
@@ -88,10 +113,10 @@ func _update_water_query_cache(world_position: Vector2) -> void: # Caches one ex
     var level_sample_x: float = cell_origin_x + water_cell_size * 0.5 # Reconstructs the exact x centre sampled by water mesh generation.
     var level_sample_z: float = cell_origin_z + water_cell_size * 0.5 # Reconstructs the exact z centre sampled by water mesh generation.
     _water_query_level = _water_level_sampler.sample_water_level(level_sample_x, level_sample_z) # Caches the exact flat level owned by the rendered cell.
-    _water_query_top_left_height = _height_sampler.sample_height(cell_origin_x, cell_origin_z) # Caches the back-left terrain corner used by water clipping.
-    _water_query_top_right_height = _height_sampler.sample_height(cell_origin_x + water_cell_size, cell_origin_z) # Caches the back-right terrain corner used by water clipping.
-    _water_query_bottom_left_height = _height_sampler.sample_height(cell_origin_x, cell_origin_z + water_cell_size) # Caches the forward-left terrain corner used by water clipping.
-    _water_query_bottom_right_height = _height_sampler.sample_height(cell_origin_x + water_cell_size, cell_origin_z + water_cell_size) # Caches the forward-right terrain corner used by water clipping.
+    _water_query_top_left_height = get_height_at(Vector2(cell_origin_x, cell_origin_z)) # Caches the back-left terrain corner used by water clipping.
+    _water_query_top_right_height = get_height_at(Vector2(cell_origin_x + water_cell_size, cell_origin_z)) # Caches the back-right terrain corner used by water clipping.
+    _water_query_bottom_left_height = get_height_at(Vector2(cell_origin_x, cell_origin_z + water_cell_size)) # Caches the forward-left terrain corner used by water clipping.
+    _water_query_bottom_right_height = get_height_at(Vector2(cell_origin_x + water_cell_size, cell_origin_z + water_cell_size)) # Caches the forward-right terrain corner used by water clipping.
 
 func _sample_cached_water_grid_terrain_height(world_position: Vector2) -> float: # Interpolates the active cached terrain triangle exactly as the rendered water clipper does.
     var water_cell_count: int = TerrainConfiguration.WATER_RESOLUTION - 1 # Calculates the water grid cell count shared with mesh generation.
@@ -131,17 +156,56 @@ func _append_ring_coordinates(centre: Vector2i, ring: int) -> void: # Adds one s
                 continue # Avoids rebuilding an existing chunk.
             _pending_chunks.append(chunk_coordinate) # Queues the missing chunk in near-to-far ring order.
 
-func _build_pending_chunks() -> void: # Builds a bounded number of queued chunks during the current frame.
-    var chunks_built: int = 0 # Tracks work completed against the per-frame generation budget.
-    while chunks_built < TerrainConfiguration.CHUNKS_BUILT_PER_FRAME and _pending_chunk_index < _pending_chunks.size(): # Continues while budget and queued work remain.
-        var chunk_coordinate: Vector2i = _pending_chunks[_pending_chunk_index] # Retrieves the next missing chunk without shifting the queue array.
-        _pending_chunk_index += 1 # Advances sequentially to the next queued coordinate.
-        if not _desired_chunks.has(chunk_coordinate): # Detects stale work after a rapid player movement.
-            continue # Skips chunks that are no longer visible.
-        if _chunks.has(chunk_coordinate): # Detects a chunk created immediately or through another queue path.
-            continue # Skips duplicate generation.
-        _build_chunk(chunk_coordinate) # Generates and installs one complete visual terrain and water chunk.
-        chunks_built += 1 # Consumes one unit of the current frame's generation budget.
+func _build_pending_chunks() -> void:
+    var scheduler = GenerationScheduler.instance
+    if scheduler == null or not _water_mesh_builder is SeamlessTerrainWaterMeshBuilder:
+        var built = 0
+        while built < TerrainConfiguration.CHUNKS_BUILT_PER_FRAME and _pending_chunk_index < _pending_chunks.size():
+            var cell = _pending_chunks[_pending_chunk_index]
+            _pending_chunk_index += 1
+            if not _desired_chunks.has(cell) or _chunks.has(cell): continue
+            _build_chunk(cell)
+            built += 1
+        return
+    if _building.size() >= GenerationScheduler.WORKER_LIMIT: return
+    while _pending_chunk_index < _pending_chunks.size():
+        var cell = _pending_chunks[_pending_chunk_index]
+        _pending_chunk_index += 1
+        if not _desired_chunks.has(cell) or _chunks.has(cell) or _building.has(cell): continue
+        _building[cell] = true
+        _prepare_background_chunk(cell,scheduler)
+        break
+
+func _prepare_background_chunk(cell: Vector2i, scheduler: GenerationScheduler):
+    scheduler.active_owner = self
+    scheduler.active_priority = 0 if maxi(absi(cell.x-_current_chunk_coordinate.x),absi(cell.y-_current_chunk_coordinate.y)) <= TerrainConfiguration.COLLISION_RADIUS+1 else 2
+    var routes: Dictionary = {}
+    var network = WorldPathNetwork.for_terrain(self)
+    for offset in [Vector2i.ZERO,Vector2i(1,0),Vector2i(0,1),Vector2i(1,1)]:
+        if not await scheduler.checkpoint(self):
+            _building.erase(cell)
+            return
+        routes[cell+offset] = (await network.routes_in_chunk_incremental(cell+offset,scheduler)).duplicate(true)
+    while not scheduler.has_worker_room():
+        await scheduler.frame_started
+        if not is_inside_tree() or scheduler._closing: return
+    if not _desired_chunks.has(cell) or _chunks.has(cell):
+        _building.erase(cell)
+        return
+    var job = TerrainGenerationJob.new(cell,routes)
+    if not scheduler.submit(self,job.generate,func(data): _install_background_chunk(cell,data)):
+        _building.erase(cell)
+        _pending_chunks.append(cell)
+
+func _install_background_chunk(cell: Vector2i, data: Array):
+    _building.erase(cell)
+    if _chunks.has(cell) or not _desired_chunks.has(cell):
+        if GenerationScheduler.instance != null: GenerationScheduler.instance.stale_jobs += 1
+        return
+    var token = RuntimeProfiler.begin("terrain.install_chunk") if RuntimeProfiler.recording else -1
+    _install_meshes(cell,_mesh_builder.mesh_from_arrays(data[0]),_water_mesh_builder.mesh_from_arrays(data[1]))
+    if RuntimeProfiler.recording: RuntimeProfiler.end(token)
+
 
 func _build_initial_collision_area(centre: Vector2i) -> void: # Builds all chunks required for safe spawn collision before ordinary bounded streaming begins.
     for offset_z: int in range(-TerrainConfiguration.INITIAL_COLLISION_RADIUS, TerrainConfiguration.INITIAL_COLLISION_RADIUS + 1): # Visits every initial collision row around the spawn chunk.
@@ -154,9 +218,21 @@ func _build_chunk_immediately(chunk_coordinate: Vector2i) -> void: # Builds one 
         return # Avoids duplicate mesh and collision creation.
     _build_chunk(chunk_coordinate) # Generates and installs the requested terrain and water chunk now.
 
-func _build_chunk(chunk_coordinate: Vector2i) -> void: # Generates one terrain chunk with clipped water and installs its streamable runtime node.
+func _build_chunk(chunk_coordinate: Vector2i) -> void:
+    # Timing scopes are inactive until a console recording begins.
+    if not RuntimeProfiler.recording:
+        _profile__build_chunk(chunk_coordinate)
+        return
+    var _profile_token = RuntimeProfiler.begin("terrain.build_chunk")
+    _profile__build_chunk(chunk_coordinate)
+    RuntimeProfiler.end(_profile_token)
+
+func _profile__build_chunk(chunk_coordinate: Vector2i) -> void: # Generates one terrain chunk with clipped water and installs its streamable runtime node.
     var terrain_mesh: ArrayMesh = _mesh_builder.build_chunk_mesh(chunk_coordinate) # Generates ground vertices, normals, colours, indices, and material assignment.
     var water_mesh: ArrayMesh = _water_mesh_builder.build_chunk_mesh(chunk_coordinate) # Generates only submerged water polygons and sealed local level transitions.
+    _install_meshes(chunk_coordinate,terrain_mesh,water_mesh)
+
+func _install_meshes(chunk_coordinate: Vector2i, terrain_mesh: ArrayMesh, water_mesh: ArrayMesh):
     var chunk: TerrainChunk = TerrainChunk.new() # Creates a lightweight streamable terrain body.
     chunk.name = "TerrainChunk_%d_%d" % [chunk_coordinate.x, chunk_coordinate.y] # Gives the runtime node a coordinate-derived diagnostic name.
     chunk.position = _get_chunk_local_position(chunk_coordinate) # Places local vertices relative to the current floating-world origin.
@@ -208,11 +284,7 @@ func _create_terrain_material() -> StandardMaterial3D: # Creates the shared mate
     material.metallic = 0.0 # Prevents ordinary soil, grass, rock, and snow from behaving as metal.
     return material # Returns the shared terrain material.
 
-func _create_water_material() -> StandardMaterial3D: # Creates the shared transparent material used by every clipped water surface and transition curtain.
-    var material: StandardMaterial3D = StandardMaterial3D.new() # Allocates one reusable physically based water material.
-    material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA # Enables ordinary alpha blending without requiring overlapping sea planes.
-    material.cull_mode = BaseMaterial3D.CULL_DISABLED # Renders horizontal surfaces and vertical level transitions from either viewing side.
-    material.albedo_color = Color(0.045, 0.19, 0.25, 0.74) # Gives water a deep desaturated blue-green colour with visible transparency.
-    material.roughness = 0.18 # Keeps broad water surfaces smoother and more reflective than the surrounding terrain.
-    material.metallic = 0.0 # Keeps water dielectric rather than metallic.
-    return material # Returns the shared water material.
+func _create_water_material() -> Material:
+    var material: ShaderMaterial = ShaderMaterial.new()
+    material.shader = preload("res://world/biomes/stylized_water.gdshader")
+    return material

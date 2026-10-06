@@ -199,3 +199,54 @@ func _get_grounded_world_position(horizontal_position: Vector2) -> Vector3: # Co
 
 func _get_yaw_from_outward_direction(outward_direction: Vector2) -> float: # Converts a sampled downhill terrain direction into the same yaw convention used by existing exterior doors and return placement.
     return _get_yaw_facing_target(Vector2.ZERO, outward_direction) # Reuses the proven negative-z-forward yaw helper with direction represented as a target from the origin.
+
+func _find_cliff_placement_incremental(intended_position: Vector2, scheduler: GenerationScheduler) -> DungeonEntrancePlacement: # Searches outward from one conceptual endpoint until finding the nearest deterministic qualifying terrain face.
+    var direct_placement: DungeonEntrancePlacement = _evaluate_cliff_site(intended_position) # Tests the intended coordinate first so existing deterministic placement changes only when terrain embedding requires it.
+    if direct_placement != null: # Detects an intended endpoint that already sits at the foot of a valid rising landform.
+        return direct_placement # Preserves that exact position and its sampled downhill-facing direction.
+    var angle_offset: float = fposmod(intended_position.x * SEARCH_ANGLE_SCALE_X + intended_position.y * SEARCH_ANGLE_SCALE_Z, TAU) # Rotates each radial search deterministically so the world never reveals fixed cardinal placement spokes.
+    for ring: int in range(1, CLIFF_SEARCH_RING_COUNT + 1): # Expands through bounded rings so the nearest qualifying terrain face wins naturally.
+        if not await scheduler.checkpoint(): return null
+        var radius: float = float(ring) * CLIFF_SEARCH_RING_STEP # Converts the ring index into physical correction distance from the conceptual endpoint.
+        for direction_index: int in range(CLIFF_SEARCH_DIRECTIONS): # Samples evenly distributed directions around the current search ring.
+            if not await scheduler.checkpoint(): return null
+            var angle: float = angle_offset + TAU * float(direction_index) / float(CLIFF_SEARCH_DIRECTIONS) # Applies the endpoint-specific rotation before calculating this candidate direction.
+            var candidate: Vector2 = intended_position + Vector2(cos(angle), sin(angle)) * radius # Builds the absolute procedural-world candidate coordinate for cliff analysis.
+            var placement: DungeonEntrancePlacement = _evaluate_cliff_site(candidate) # Tests terrain mass, approach clearance, shoulder coverage, and doorway footing at the candidate.
+            if placement != null: # Detects the first qualifying cliff, hill, or mountain face on the nearest successful ring.
+                return placement # Returns the deterministic terrain-embedded entrance placement immediately.
+    return null # Reports that this conceptual endpoint cannot support an exterior dungeon entrance without violating the terrain-only requirement.
+
+func _build_pair_if_nearby_incremental(region_coordinate: Vector2i, player_horizontal: Vector2, scheduler: GenerationScheduler) -> DungeonPairDefinition: # Reconstructs one infinite-region pair only when both exterior endpoints can be embedded into qualifying terrain faces.
+    var pair_id: int = _get_pair_id(region_coordinate) # Calculates the same stable identity used by the base streamer, labels, routing, and interior generation.
+    var pair_seed: int = _get_pair_random_seed(pair_id) # Derives deterministic endpoint placement randomness from world seed and infinite region identity.
+    var rng: RandomNumberGenerator = RandomNumberGenerator.new() # Creates a local pair-placement generator without mutating global random state.
+    rng.seed = pair_seed # Resets midpoint, separation, and axis choices identically whenever the pair is reconstructed.
+    var region_origin: Vector2 = Vector2(float(region_coordinate.x) * DUNGEON_REGION_SIZE, float(region_coordinate.y) * DUNGEON_REGION_SIZE) # Calculates the absolute southwest corner of the pair's owning infinite region.
+    var midpoint_margin: float = DUNGEON_REGION_SIZE * REGION_MIDPOINT_MARGIN # Converts the inherited normalized region margin into physical world-space distance.
+    var midpoint: Vector2 = region_origin + Vector2(rng.randf_range(midpoint_margin, DUNGEON_REGION_SIZE - midpoint_margin), rng.randf_range(midpoint_margin, DUNGEON_REGION_SIZE - midpoint_margin)) # Places the conceptual pair centre irregularly inside its region before terrain-face correction.
+    var separation: float = _sample_pair_separation(rng) # Preserves the inherited logarithmic distance distribution from local shortcuts through rare multi-kilometre links.
+    var separation_angle: float = rng.randf_range(0.0, TAU) # Chooses an unrestricted deterministic axis for the conceptual endpoint pair.
+    var span_direction: Vector2 = Vector2(cos(separation_angle), sin(separation_angle)) # Converts the deterministic axis angle into a normalized horizontal direction.
+    var half_span: float = separation * 0.5 # Splits the complete pair span evenly around its conceptual midpoint before terrain correction.
+    var intended_a: Vector2 = midpoint - span_direction * half_span # Calculates the first conceptual endpoint before searching for a nearby valid terrain face.
+    var intended_b: Vector2 = midpoint + span_direction * half_span # Calculates the second conceptual endpoint on the opposite side of the pair midpoint.
+    var cliff_search_allowance: float = float(CLIFF_SEARCH_RING_COUNT) * CLIFF_SEARCH_RING_STEP # Measures the maximum endpoint correction introduced by the cliff-only terrain search.
+    var prefetch_distance: float = PAIR_LOAD_DISTANCE + cliff_search_allowance # Expands the inherited prefetch threshold enough to include portals moved onto nearby hillsides.
+    if intended_a.distance_to(player_horizontal) > prefetch_distance and intended_b.distance_to(player_horizontal) > prefetch_distance: # Detects a region whose conceptual endpoints cannot produce a currently relevant streamed entrance.
+        return null # Avoids expensive cliff analysis for the overwhelming majority of distant implicit regions.
+    var endpoint_a_placement: DungeonEntrancePlacement = await _find_cliff_placement_incremental(intended_a, scheduler) # Searches deterministically for a qualifying rising terrain face near conceptual endpoint A.
+    if endpoint_a_placement == null: # Detects regions where endpoint A has no cliff, hill, or mountain face within the bounded correction radius.
+        return null # Omits the complete dungeon pair so a forbidden freestanding entrance is never generated.
+    var endpoint_b_placement: DungeonEntrancePlacement = await _find_cliff_placement_incremental(intended_b, scheduler) # Searches independently for a qualifying rising terrain face near conceptual endpoint B.
+    if endpoint_b_placement == null: # Detects regions where only one side can satisfy the terrain-embedded entrance requirement.
+        return null # Omits the complete pair because both linked exterior doors must obey the same terrain rule.
+    var pair: DungeonPairDefinition = DungeonPairDefinition.new() # Allocates the unchanged pair metadata object consumed by the base streaming and transition systems.
+    pair.pair_id = pair_id # Assigns the stable infinite-region identity after both terrain placements have been validated.
+    pair.region_coordinate = region_coordinate # Retains the owning region coordinate for deterministic reconstruction and readable remote-tree labels.
+    pair.dungeon_seed = pair_seed ^ 7_919_357 # Preserves the established independent deterministic stream for interior dungeon generation.
+    pair.endpoint_a_world_position = _get_grounded_world_position(endpoint_a_placement.world_position) # Grounds exterior A at the foot of its validated rising terrain face.
+    pair.endpoint_b_world_position = _get_grounded_world_position(endpoint_b_placement.world_position) # Grounds exterior B at the foot of its independently validated terrain face.
+    pair.endpoint_a_yaw = _get_yaw_from_outward_direction(endpoint_a_placement.outward_direction) # Faces A downhill so its rear masonry and tunnel throat disappear into the hill behind it.
+    pair.endpoint_b_yaw = _get_yaw_from_outward_direction(endpoint_b_placement.outward_direction) # Faces B downhill from its own terrain gradient rather than toward the geographically paired door.
+    return pair # Returns a pair only after both endpoints satisfy the cliff-, hill-, or mountain-only placement contract.

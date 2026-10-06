@@ -1,0 +1,32 @@
+extends SceneTree
+func _initialize(): run.call_deferred()
+func run():
+    var game = load("res://application/game/game.tscn").instantiate()
+    root.add_child(game)
+    var console = game.get_node("DeveloperConsole")
+    var profiler = game.get_node("RuntimeProfiler")
+    for frame in range(8): await physics_frame
+    console._execute_command("profile start")
+    assert(RuntimeProfiler.recording)
+    console._execute_command("profile mark exploring terrain")
+    console._execute_command("profile status")
+    for frame in range(15): await process_frame
+    console._execute_command("profile export")
+    assert(not RuntimeProfiler.recording and not profiler.last_export_path.is_empty())
+    var file = FileAccess.open(profiler.last_export_path,FileAccess.READ)
+    var data = JSON.parse_string(file.get_as_text())
+    file.close()
+    assert(data.markers[0].label == "exploring terrain")
+    assert(data.summary.frames > 0 and data.systems.size() > 8)
+    assert(data.samples[0].context.streams.has("grass"))
+    assert(data.samples[0].context.streams.has("homes"))
+    assert(data.samples[0].has("system_totals_us"))
+    assert(console._output.get_parsed_text().contains(profiler.last_export_path))
+    console._execute_command("profiler start")
+    assert(RuntimeProfiler.recording)
+    console._execute_command("profile stop")
+    assert(not RuntimeProfiler.recording)
+    game.queue_free()
+    await process_frame
+    print("PASS full game console start/mark/status/export/stop, alias, system timing, stream counters, timeline totals and saved path output")
+    quit()

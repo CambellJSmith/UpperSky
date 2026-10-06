@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="EquipmentDefinition" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://items/equipment/equipment_definition.gd" id="1_definition"]
+[ext_resource type="PackedScene" path="res://items/equipment/scenes/bronze_longsword.tscn" id="2_scene"]
+
+[resource]
+script = ExtResource("1_definition")
+item_id = &"bronze_longsword"
+display_name = "Bronze-Hilt Longsword"
+category = 0
+unit_weight = 2.8
+held_scene = ExtResource("2_scene")
+reach = 2.5
+primary_cooldown = 0.58
+damage = 30.0
+tool_power = 0.0
+tool_tags = PackedStringArray("melee", "blade", "sword")

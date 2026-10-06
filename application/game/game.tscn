@@ -1,62 +1,100 @@
-[gd_scene load_steps=17 format=3]
+[gd_scene format=3 uid="uid://8b5r38fpr2xd"]
 
-[ext_resource type="Script" path="res://application/game/game.gd" id="1_game"]
+[ext_resource type="Script" uid="uid://co15uoogmkn2e" path="res://application/game/game.gd" id="1_game"]
 [ext_resource type="PackedScene" path="res://world/environments/basic_world.tscn" id="2_world"]
 [ext_resource type="PackedScene" path="res://actors/player/first_person_player.tscn" id="3_player"]
-[ext_resource type="Script" path="res://application/debug/developer_console.gd" id="4_console"]
-[ext_resource type="Script" path="res://application/effects/underwater_view.gd" id="5_underwater"]
+[ext_resource type="Script" uid="uid://cn224pbch3sla" path="res://application/debug/developer_console.gd" id="4_console"]
+[ext_resource type="Script" uid="uid://xtovjmrr8unn" path="res://application/effects/underwater_view.gd" id="5_underwater"]
 [ext_resource type="PackedScene" path="res://application/ui/player_status_hud.tscn" id="6_status_hud"]
 [ext_resource type="PackedScene" path="res://application/ui/player_inventory_ui.tscn" id="7_inventory_ui"]
-[ext_resource type="Script" path="res://application/game/starting_inventory.gd" id="8_starting_inventory"]
-[ext_resource type="Script" path="res://world/decorations/world_decoration_streamer.gd" id="9_decorations"]
-[ext_resource type="Script" path="res://world/vegetation/ground_flora_streamer.gd" id="10_flora"]
-[ext_resource type="Script" path="res://world/vegetation/dense_ground_cover_streamer.gd" id="11_dense_cover"]
-[ext_resource type="PackedScene" path="res://actors/enemies/straw_dummy/straw_dummy_enemy.tscn" id="12_training_dummy"]
-[ext_resource type="Script" path="res://application/game/training_dummy_placement.gd" id="13_training_dummy_placement"]
-[ext_resource type="Script" path="res://world/dungeons/collidable_cliff_dungeon_system.gd" id="14_dungeon_system"]
-[ext_resource type="PackedScene" path="res://actors/npcs/generic_human/generic_human_npc.tscn" id="15_generic_human"]
-[ext_resource type="Script" path="res://application/game/generic_human_npc_placement.gd" id="16_generic_human_placement"]
+[ext_resource type="Script" uid="uid://dy85mo17u2opd" path="res://application/game/starting_inventory.gd" id="8_starting_inventory"]
+[ext_resource type="Script" uid="uid://dc7bghg4efp7k" path="res://world/decorations/world_decoration_streamer.gd" id="9_decorations"]
+[ext_resource type="Script" uid="uid://bm273wfofxgol" path="res://world/vegetation/ground_flora_streamer.gd" id="10_flora"]
+[ext_resource type="Script" uid="uid://ce064ht2wfymh" path="res://world/vegetation/dense_ground_cover_streamer.gd" id="11_dense_cover"]
+[ext_resource type="Script" uid="uid://cs2ldn53vwr0i" path="res://world/dungeons/collidable_cliff_dungeon_system.gd" id="14_dungeon_system"]
+[ext_resource type="Script" uid="uid://srhh10lobw5d" path="res://world/camps/camp_streamer.gd" id="17_camps"]
+[ext_resource type="Script" uid="uid://cbeor5cmw0an0" path="res://application/game/bedroll_interaction.gd" id="18_bedroll_interaction"]
+[ext_resource type="Script" uid="uid://du5mw157s65un" path="res://world/biomes/biome_feature_streamer.gd" id="19_biome_features"]
+[ext_resource type="Script" uid="uid://7587dceo0axc" path="res://world/settlements/settlement_streamer.gd" id="20_settlements"]
+[ext_resource type="Script" uid="uid://cy7yhd7j0j4vf" path="res://actors/npcs/villagers/population_streamer.gd" id="21_villagers"]
+[ext_resource type="Script" uid="uid://bml87rvt6xr7u" path="res://world/paths/path_streamer.gd" id="22_paths"]
+[ext_resource type="Script" uid="uid://cic5odhha05nn" path="res://world/wayshrines/wayshrine_streamer.gd" id="26_shrines"]
+[ext_resource type="Script" uid="uid://c6e6hlxcfc2ah" path="res://application/game/wayshrine_interaction.gd" id="27_shrine_ui"]
+[ext_resource type="Script" uid="uid://dax88ugcpr2te" path="res://application/debug/runtime_profiler.gd" id="28_profiler"]
+[ext_resource type="Script" uid="uid://d2ns4v4o3swq4" path="res://application/save/save_system.gd" id="29_save"]
+[ext_resource type="Script" uid="uid://fbrsnuqcwpsp" path="res://application/streaming/generation_scheduler.gd" id="30_scheduler"]
+[ext_resource type="Script" path="res://actors/npcs/populations/volcano_population.gd" id="31_demons"]
+[ext_resource type="Script" path="res://actors/npcs/populations/water_population.gd" id="32_fish"]
 
-[node name="Game" type="Node3D"]
+[node name="Game" type="Node3D" unique_id=1438919531]
 script = ExtResource("1_game")
 
-[node name="World" parent="." instance=ExtResource("2_world")]
+[node name="World" parent="." unique_id=2075177073 instance=ExtResource("2_world")]
 
-[node name="DynamicEntities" type="Node3D" parent="."]
+[node name="BiomeFeatures" type="Node3D" parent="World" unique_id=1502754295]
+script = ExtResource("19_biome_features")
 
-[node name="Player" parent="DynamicEntities" instance=ExtResource("3_player")]
+[node name="Settlements" type="Node3D" parent="World" unique_id=2017465334]
+script = ExtResource("20_settlements")
 
-[node name="TrainingDummy" parent="DynamicEntities" instance=ExtResource("12_training_dummy")]
+[node name="Villagers" type="Node3D" parent="World" unique_id=1508769642]
+script = ExtResource("21_villagers")
 
-[node name="GenericHumanNpc" parent="DynamicEntities" instance=ExtResource("15_generic_human")]
+[node name="VolcanoPopulation" type="Node3D" parent="World"]
+script = ExtResource("31_demons")
 
-[node name="WorldDecorations" type="Node3D" parent="."]
+[node name="WaterPopulation" type="Node3D" parent="World"]
+script = ExtResource("32_fish")
+
+[node name="Paths" type="Node3D" parent="World" unique_id=1452037469]
+script = ExtResource("22_paths")
+
+[node name="Wayshrines" type="Node3D" parent="World" unique_id=2122597905]
+script = ExtResource("26_shrines")
+
+[node name="DynamicEntities" type="Node3D" parent="." unique_id=1123549643]
+
+[node name="Player" parent="DynamicEntities" unique_id=1335322509 instance=ExtResource("3_player")]
+
+[node name="WorldDecorations" type="Node3D" parent="." unique_id=530708357]
 script = ExtResource("9_decorations")
 
-[node name="GroundFlora" type="Node3D" parent="."]
+[node name="GroundFlora" type="Node3D" parent="." unique_id=710963368]
 script = ExtResource("10_flora")
 
-[node name="DenseGroundCover" type="Node3D" parent="."]
+[node name="DenseGroundCover" type="Node3D" parent="." unique_id=255261220]
 script = ExtResource("11_dense_cover")
 
-[node name="StartingInventory" type="Node" parent="."]
+[node name="StartingInventory" type="Node" parent="." unique_id=1264031106]
 script = ExtResource("8_starting_inventory")
 
-[node name="TrainingDummyPlacement" type="Node" parent="."]
-script = ExtResource("13_training_dummy_placement")
-
-[node name="GenericHumanNpcPlacement" type="Node" parent="."]
-script = ExtResource("16_generic_human_placement")
-
-[node name="DungeonSystem" type="Node3D" parent="."]
+[node name="DungeonSystem" type="Node3D" parent="." unique_id=369329010]
 script = ExtResource("14_dungeon_system")
 
-[node name="UnderwaterView" type="CanvasLayer" parent="."]
+[node name="UnderwaterView" type="CanvasLayer" parent="." unique_id=2125831297]
 script = ExtResource("5_underwater")
 
-[node name="PlayerStatusHud" parent="." instance=ExtResource("6_status_hud")]
+[node name="PlayerStatusHud" parent="." unique_id=361196745 instance=ExtResource("6_status_hud")]
 
-[node name="PlayerInventoryUi" parent="." instance=ExtResource("7_inventory_ui")]
+[node name="PlayerInventoryUi" parent="." unique_id=1144578426 instance=ExtResource("7_inventory_ui")]
 
-[node name="DeveloperConsole" type="CanvasLayer" parent="."]
+[node name="DeveloperConsole" type="CanvasLayer" parent="." unique_id=938133770]
 script = ExtResource("4_console")
+
+[node name="EnemyCamps" type="Node3D" parent="." unique_id=674198192]
+script = ExtResource("17_camps")
+
+[node name="BedrollInteraction" type="CanvasLayer" parent="." unique_id=166582582]
+script = ExtResource("18_bedroll_interaction")
+
+[node name="WayshrineInteraction" type="CanvasLayer" parent="." unique_id=203903868]
+script = ExtResource("27_shrine_ui")
+
+[node name="RuntimeProfiler" type="Node" parent="." unique_id=830845055]
+script = ExtResource("28_profiler")
+
+[node name="GenerationScheduler" type="Node" parent="." unique_id=179235201]
+script = ExtResource("30_scheduler")
+
+[node name="SaveSystem" type="Node" parent="." unique_id=1481313246]
+script = ExtResource("29_save")

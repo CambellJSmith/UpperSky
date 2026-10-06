@@ -8,14 +8,23 @@ const MINIMUM_TRIANGLE_AREA_SQUARED: float = 0.000001 # Prevents numerically col
 
 var _height_sampler: TerrainHeightSampler # Supplies the authoritative terrain surface used for exact shoreline clipping.
 var _water_level_sampler: TerrainWaterLevelSampler # Supplies one of the world's flat local water bands at every horizontal position.
-var _water_material: StandardMaterial3D # Shades all generated water surfaces and level-transition curtains.
+var _water_material: Material # Shades all generated water surfaces and level-transition curtains.
 
-func _init(height_sampler: TerrainHeightSampler, water_level_sampler: TerrainWaterLevelSampler, water_material: StandardMaterial3D) -> void: # Captures the reusable generation services shared by every water chunk.
+func _init(height_sampler: TerrainHeightSampler, water_level_sampler: TerrainWaterLevelSampler, water_material: Material) -> void: # Captures the reusable generation services shared by every water chunk.
     _height_sampler = height_sampler # Stores the authoritative terrain-height service.
     _water_level_sampler = water_level_sampler # Stores the deterministic local water-level service.
     _water_material = water_material # Stores the shared transparent water material.
 
-func build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh: # Generates clipped water surfaces and sealed transitions for one terrain chunk.
+func build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh:
+    # Timing scopes are inactive until a console recording begins.
+    if not RuntimeProfiler.recording:
+        return _profile_build_chunk_mesh(chunk_coordinate)
+    var _profile_token = RuntimeProfiler.begin("water.mesh")
+    var _profile_result = _profile_build_chunk_mesh(chunk_coordinate)
+    RuntimeProfiler.end(_profile_token)
+    return _profile_result
+
+func _profile_build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh: # Generates clipped water surfaces and sealed transitions for one terrain chunk.
     var water_resolution: int = TerrainConfiguration.WATER_RESOLUTION # Reads the deliberately lower water-grid resolution used for bounded generation cost.
     var cell_count: int = water_resolution - 1 # Calculates the number of water cells along one chunk axis.
     var vertex_spacing: float = TerrainConfiguration.CHUNK_SIZE / float(cell_count) # Calculates the world distance represented by one water cell.

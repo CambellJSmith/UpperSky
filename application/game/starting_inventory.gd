@@ -12,6 +12,7 @@ func _ready() -> void: # Defers starting-item grants until the composed player s
     _grant_starting_items.call_deferred() # Schedules deterministic inventory grants after the current ready pass.
 
 func _grant_starting_items() -> void: # Adds every authored starting item to its correct inventory category.
+    if not get_parent().get_node("SaveSystem").startup.is_empty(): return
     if _inventory == null: # Detects a broken game composition without the required player inventory.
         push_error("Unable to grant starting inventory: PlayerInventory was not found.") # Reports the missing dependency for development diagnostics.
         return # Stops before attempting item grants against a missing model.
@@ -19,8 +20,8 @@ func _grant_starting_items() -> void: # Adds every authored starting item to its
     if not _inventory.try_add_item(MYSTERIOUS_LOCKET_ID, MYSTERIOUS_LOCKET_NAME, MYSTERIOUS_LOCKET_WEIGHT, MYSTERIOUS_LOCKET_QUANTITY, InventoryCategory.Type.MISC): # Adds the locket to the Misc tab using the shared category model.
         push_error("Unable to grant starting item: Mysterious Locket.") # Reports any capacity or definition failure during the locket grant.
 
-    _grant_equipment(EquipmentCatalog.IRON_SWORD) # Adds the authored iron sword under Weapons/Tools.
-    _grant_equipment(EquipmentCatalog.IRON_PICKAXE) # Adds the authored iron pickaxe under Weapons/Tools.
+    for definition: EquipmentDefinition in EquipmentCatalog.DEFINITIONS:
+        _grant_equipment(definition)
 
 func _grant_equipment(definition: EquipmentDefinition) -> void: # Adds one valid equipment definition to the shared Weapons/Tools inventory category.
     if definition == null or not definition.is_valid(): # Rejects missing or malformed equipment definitions before touching inventory state.

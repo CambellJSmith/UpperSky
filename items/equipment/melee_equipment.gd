@@ -1,5 +1,8 @@
-extends EquippedItem # Provides reusable first-person melee behaviour for PNG-based weapons and tools.
+extends EquippedItem # Provides reusable first-person melee behaviour for 3D weapons and tools.
 class_name MeleeEquipment # Exposes the melee runtime type for authored held-item scenes.
+
+enum MotionProfile { SLASH, CHOP, STAB }
+@export var motion_profile: MotionProfile = MotionProfile.SLASH
 
 const RECEIVER_SEARCH_DEPTH: int = 4 # Bounds parent traversal when locating an equipment-hit receiver.
 
@@ -10,6 +13,12 @@ var _swing_tween: Tween # Owns the active staged swing animation so it can be re
 func _ready() -> void: # Captures the authored pose before runtime swing motion begins.
     _rest_position = position # Preserves the scene-defined held-item position.
     _rest_rotation = rotation # Preserves the scene-defined held-item rotation.
+
+func on_unequipped() -> void:
+    if _swing_tween != null and _swing_tween.is_valid():
+        _swing_tween.kill()
+    position = _rest_position
+    rotation = _rest_rotation
 
 func _perform_primary_use() -> bool: # Starts a staged melee swing when the required equipment dependencies are available.
     if _definition == null or _player == null or _camera == null: # Rejects use when equipment initialization is incomplete.
@@ -58,10 +67,12 @@ func _play_use_motion() -> void: # Selects a swing profile that matches the equi
         _swing_tween.kill() # Prevents overlapping tweens from fighting over the same held-item transform.
     position = _rest_position # Resets the item to its authored translation before beginning a new swing.
     rotation = _rest_rotation # Resets the item to its authored rotation before beginning a new swing.
-    if _definition.category == EquipmentDefinition.Category.WEAPON: # Routes weapons to a fast diagonal slash profile.
-        _play_weapon_swing() # Animates a lighter lateral weapon strike.
-    else: # Routes tools to a heavier overhead working motion.
-        _play_tool_swing() # Animates a weightier tool chop with longer recovery.
+    if _definition.category == EquipmentDefinition.Category.TOOL or motion_profile == MotionProfile.CHOP:
+        _play_tool_swing()
+    elif motion_profile == MotionProfile.STAB:
+        _play_knife_thrust()
+    else:
+        _play_weapon_swing()
 
 func _play_weapon_swing() -> void: # Animates windup, diagonal strike, follow-through, and recovery for a melee weapon.
     var windup_position: Vector3 = _rest_position + Vector3(0.055, 0.035, 0.045) # Moves the weapon slightly back toward the ready shoulder before the cut.
@@ -102,3 +113,18 @@ func _play_tool_swing() -> void: # Animates a heavier overhead work swing for pi
     _swing_tween.parallel().tween_property(self, "rotation", follow_rotation, 0.08).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT) # Preserves rotational follow-through after the strike.
     _swing_tween.tween_property(self, "position", _rest_position, 0.22).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT) # Returns the heavier tool to its ready position at a slower rate.
     _swing_tween.parallel().tween_property(self, "rotation", _rest_rotation, 0.22).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT) # Settles the tool back into its authored ready angle.
+
+func _play_knife_thrust() -> void:
+    var windup = _rest_position + Vector3(.035, -.015, .08)
+    var strike = _rest_position + Vector3(-.20, .06, -.24)
+    var strike_rotation = _rest_rotation + Vector3(deg_to_rad(-65), deg_to_rad(-10), deg_to_rad(15))
+    _swing_tween = create_tween()
+    _swing_tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+    _swing_tween.tween_property(self, "position", windup, .07)
+    _swing_tween.parallel().tween_property(self, "rotation", strike_rotation * .35 + _rest_rotation * .65, .07)
+    _swing_tween.tween_property(self, "position", strike, .08).set_ease(Tween.EASE_IN)
+    _swing_tween.parallel().tween_property(self, "rotation", strike_rotation, .08)
+    _swing_tween.tween_callback(_apply_melee_hit)
+    _swing_tween.tween_interval(.05)
+    _swing_tween.tween_property(self, "position", _rest_position, .15).set_ease(Tween.EASE_OUT)
+    _swing_tween.parallel().tween_property(self, "rotation", _rest_rotation, .15)

@@ -1,7 +1,7 @@
 extends RefCounted # Converts deterministic height samples into renderable seamless terrain meshes.
 class_name TerrainMeshBuilder # Makes terrain mesh construction available to the streaming controller.
 
-const TERRAIN_SURFACE_SHADER: Shader = preload("res://world/terrain/terrain_surface.gdshader") # Adds procedural sand grain while preserving authored vertex colours.
+const TERRAIN_SURFACE_SHADER: Shader = preload("res://world/terrain/terrain_surface.gdshader") # Applies matte vertex colours and flat face lighting.
 
 const DEEP_VALLEY_COLOR: Color = Color(0.12, 0.20, 0.10, 1.0) # Represents the deepest sheltered valley floors and basin bottoms.
 const LOWLAND_COLOR: Color = Color(0.19, 0.29, 0.13, 1.0) # Represents fertile low shelves and broad valley corridors.
@@ -14,8 +14,8 @@ const DRY_SAND_COLOR: Color = Color(0.62, 0.51, 0.31, 1.0) # Represents sun-drie
 const WET_SAND_COLOR: Color = Color(0.42, 0.35, 0.23, 1.0) # Represents saturated sand immediately beside and below water.
 const SUBMERGED_SAND_COLOR: Color = Color(0.48, 0.44, 0.29, 1.0) # Represents shallow sandy lake, river, and sea beds.
 const DEEP_SEDIMENT_COLOR: Color = Color(0.28, 0.29, 0.22, 1.0) # Represents darker compacted sandy sediment in deep water.
-const WORN_PATH_EDGE_COLOR: Color = Color(0.34, 0.28, 0.17, 1.0) # Represents dry disturbed soil at the softer margins of a travelled path.
-const WORN_PATH_CORE_COLOR: Color = Color(0.25, 0.20, 0.12, 1.0) # Represents darker compacted earth at the heavily travelled path centre.
+const WORN_PATH_EDGE_COLOR: Color = WorldPathNetwork.EDGE_COLOUR # Represents dry disturbed soil at the softer margins of a travelled path.
+const WORN_PATH_CORE_COLOR: Color = WorldPathNetwork.CORE_COLOUR # Represents darker compacted earth at the heavily travelled path centre.
 
 const DRY_SAND_FULL_HEIGHT: float = 14.0 # Keeps the beach strongly sandy close to the waterline.
 const DRY_SAND_FADE_HEIGHT: float = 54.0 # Blends sand into inland soil across a broad shoreline margin.
@@ -26,17 +26,36 @@ const SAND_SLOPE_FADE_END: float = 0.52 # Removes sand from steep faces that sho
 const PATH_MINIMUM_WATER_CLEARANCE: float = 1.5 # Prevents dry worn soil from replacing visibly submerged shoreline material.
 const PATH_FULL_WATER_CLEARANCE: float = 10.0 # Restores full path colour once terrain is clearly above the local water band.
 
+var path_routes: Dictionary = {}
+var _path_network: WorldPathNetwork
+var _path_terrain: InfiniteTerrain
+
 var _height_sampler: TerrainHeightSampler # Supplies one continuous deterministic height function for every chunk.
 var _water_level_sampler: TerrainWaterLevelSampler # Supplies the same deterministic local water bands used by rendered water.
-var _terrain_material: ShaderMaterial # Shades terrain vertex colours and adds procedural grain only where alpha marks loose or worn soil.
+var _terrain_material: ShaderMaterial # Shares the matte low-poly terrain shader across chunks.
 
-func _init(height_sampler: TerrainHeightSampler, _unused_terrain_material: StandardMaterial3D) -> void: # Captures reusable generation resources shared by every chunk.
+func _init(height_sampler: TerrainHeightSampler, _unused_terrain_material: StandardMaterial3D, path_terrain: InfiniteTerrain = null, create_material: bool = true) -> void: # Captures reusable generation resources shared by every chunk.
+    _path_terrain = path_terrain
+    if path_terrain != null: _path_network = WorldPathNetwork.for_terrain(path_terrain)
     _height_sampler = height_sampler # Stores the authoritative procedural height service.
-    _water_level_sampler = TerrainWaterLevelSampler.new() # Recreates the deterministic water-band service for shoreline classification.
+    _water_level_sampler = SeamlessTerrainWaterLevelSampler.new() # Recreates the deterministic water-band service for shoreline classification.
+    if not create_material: return
     _terrain_material = ShaderMaterial.new() # Creates one reusable shader material for every generated terrain surface.
     _terrain_material.shader = TERRAIN_SURFACE_SHADER # Uses vertex alpha as a grain mask for sand and compacted paths.
 
-func build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh: # Generates a seamless regular-grid terrain mesh for one world chunk.
+func build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh:
+    # Timing scopes are inactive until a console recording begins.
+    if not RuntimeProfiler.recording:
+        return _profile_build_chunk_mesh(chunk_coordinate)
+    var _profile_token = RuntimeProfiler.begin("terrain.mesh")
+    var _profile_result = _profile_build_chunk_mesh(chunk_coordinate)
+    RuntimeProfiler.end(_profile_token)
+    return _profile_result
+
+func _profile_build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh: # Generates a seamless regular-grid terrain mesh for one world chunk.
+    return mesh_from_arrays(build_chunk_arrays(chunk_coordinate))
+
+func build_chunk_arrays(chunk_coordinate: Vector2i) -> Array:
     var vertex_spacing: float = TerrainConfiguration.CHUNK_SIZE / float(TerrainConfiguration.CHUNK_RESOLUTION - 1) # Calculates the distance between neighbouring terrain vertices.
     var cache_resolution: int = TerrainConfiguration.CHUNK_RESOLUTION + 2 # Adds a one-sample border around the chunk for seam-consistent normals.
     var height_cache: PackedFloat32Array = PackedFloat32Array() # Stores sampled heights for vertices and their external normal neighbours.
@@ -113,6 +132,9 @@ func build_chunk_mesh(chunk_coordinate: Vector2i) -> ArrayMesh: # Generates a se
     arrays[Mesh.ARRAY_COLOR] = colours # Assigns generated terrain colours and loose-soil grain masks.
     arrays[Mesh.ARRAY_TEX_UV] = uvs # Assigns seamless world-space texture coordinates.
     arrays[Mesh.ARRAY_INDEX] = indices # Assigns the regular-grid triangle index buffer.
+    return arrays
+
+func mesh_from_arrays(arrays: Array) -> ArrayMesh:
     var terrain_mesh: ArrayMesh = ArrayMesh.new() # Creates the renderable mesh resource for this chunk.
     terrain_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays) # Uploads all generated channels as one efficient triangle surface.
     terrain_mesh.surface_set_material(0, _terrain_material) # Shares one procedural terrain material across every chunk.
@@ -158,7 +180,7 @@ func _get_terrain_colour(height: float, normal: Vector3, water_level: float, wor
     sand_weight *= deposition_weight * (1.0 - rock_blend * 0.90) # Preserves rocky shores and underwater escarpments while covering gentle ground.
     var final_colour: Color = terrain_colour.lerp(sand_colour, sand_weight) # Blends sandy deposition over the underlying geology.
 
-    var path_mask: float = TerrainPathSampler.get_wear_mask(world_position) # Samples the deterministic compacted path network at this vertex.
+    var path_mask: float = _wear_mask(world_position) # Samples the deterministic compacted path network at this vertex.
     var path_water_weight: float = smoothstep(PATH_MINIMUM_WATER_CLEARANCE, PATH_FULL_WATER_CLEARANCE, height_above_water) # Fades worn soil away before a path enters visible water.
     var path_slope_weight: float = 1.0 - smoothstep(0.16, 0.46, steepness) # Prevents dirt paths from painting near-vertical exposed rock.
     var path_weight: float = path_mask * path_water_weight * path_slope_weight # Combines route placement with dry-ground and slope suitability.
@@ -166,4 +188,15 @@ func _get_terrain_colour(height: float, normal: Vector3, water_level: float, wor
     var path_colour: Color = WORN_PATH_EDGE_COLOR.lerp(WORN_PATH_CORE_COLOR, path_core_weight) # Darkens the travelled centre while retaining lighter disturbed margins.
     final_colour = final_colour.lerp(path_colour, path_weight) # Replaces vegetation colour with compacted earth along suitable dry paths.
     var grain_weight: float = maxf(sand_weight, path_weight * 0.88) # Reuses the existing fine surface grain on both beaches and disturbed path soil.
-    return Color(final_colour.r, final_colour.g, final_colour.b, grain_weight) # Stores the shared loose-soil grain mask in alpha without affecting terrain opacity.
+    return BiomeProfile.terrain_colour(world_position, Color(final_colour.r, final_colour.g, final_colour.b, grain_weight), normal) # Stores the shared loose-soil grain mask in alpha without affecting terrain opacity.
+
+func _wear_mask(point: Vector2) -> float:
+    if _path_terrain != null: return TerrainPathSampler.get_wear_mask(point,_path_terrain)
+    var mask = TerrainPathSampler.get_wilderness_wear_mask(point)
+    var cell = Vector2i(floori(point.x/WorldPathNetwork.CHUNK_SIZE),floori(point.y/WorldPathNetwork.CHUNK_SIZE))
+    for road in path_routes.get(cell,[]):
+        if road.kind == "regional" or not road.bounds.has_point(point): continue
+        for i in range(road.points.size()-1):
+            var distance = SettlementSampler._segment_distance(point,road.points[i],road.points[i+1])
+            mask = maxf(mask,1-smoothstep(road.core,road.edge,distance))
+    return mask

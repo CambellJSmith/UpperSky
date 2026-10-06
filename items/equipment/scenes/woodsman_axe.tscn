@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://items/equipment/melee_equipment.gd" id="1_melee"]
+[ext_resource type="PackedScene" path="res://items/equipment/models/woodsman_axe.tscn" id="2_model"]
+
+[node name="WoodsmanAxe" type="Node3D"]
+script = ExtResource("1_melee")
+rotation_degrees = Vector3(-8, -18, -10)
+motion_profile = 1
+
+[node name="Model" parent="." instance=ExtResource("2_model")]

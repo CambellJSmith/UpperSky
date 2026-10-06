@@ -132,6 +132,18 @@ func _execute_command(command: String) -> void: # Parses and executes one comple
     if arguments.is_empty(): # Handles an empty defensive parse result.
         return # Leaves the console unchanged.
     match arguments[0].to_lower(): # Selects the command by case-insensitive first token.
+        "save", "load":
+            var saves = get_parent().get_node("SaveSystem")
+            var slot = arguments[1] if arguments.size() > 1 else "current"
+            if slot == "folder" and arguments[0] == "save":
+                OS.shell_open(ProjectSettings.globalize_path(saves.folder))
+            elif arguments[0] == "save":
+                saves.save_slot(slot)
+            else:
+                saves.load_slot(slot)
+            _write_line(saves.status)
+        "profile", "profiler":
+            _execute_profile_command(arguments)
         "help": # Lists available commands.
             _write_help() # Writes the compact reference.
         "clear": # Clears output history.
@@ -144,19 +156,42 @@ func _execute_command(command: String) -> void: # Parses and executes one comple
             _execute_infinite_vital_command(arguments, VITAL_MANA) # Parses optional state and updates the player's mana protection mode.
         "infinite_stamina": # Controls authoritative developer stamina protection.
             _execute_infinite_vital_command(arguments, VITAL_STAMINA) # Parses optional state and updates the player's stamina protection mode.
+        "npc":
+            var population = get_parent().get_node("World/Villagers")
+            var action = arguments[1].to_lower() if arguments.size() > 1 else ""
+            if action not in ["punch","kick"]:
+                _write_line("Use npc punch or npc kick near a villager.")
+            elif not population.perform_nearby(action):
+                _write_line("No available villager within 20 metres.")
+            else:
+                _write_line("Nearby villager: "+action)
+        "town", "homestead":
+            _execute_settlement_command(arguments)
+        "houses":
+            _execute_houses_command(arguments)
+        "biome":
+            _execute_biome_command(arguments)
         "time": # Inspects or modifies the world clock.
             _execute_time_command(arguments) # Parses status, speed, or direct-time arguments.
         _: # Handles unregistered commands.
             _write_line("Unknown command: %s" % arguments[0]) # Reports the unrecognized token.
 
 func _write_help() -> void: # Lists supported commands and syntax.
-    _write_line("Commands:") # Starts the reference.
+    _write_line("Commands:")
+    _write_line("  save|load [current|quick]      Save or resume. F5 saves quick; F9 loads quick.")
+    _write_line("  save folder                   Open saved games.")
+    _write_line("  profile start|stop|export|status|folder   Record and export performance.")
+    _write_line("  profile mark <description>             Label a moment in the recording.") # Starts the reference.
+    _write_line("  npc punch|kick                Preview a nearby villager action.")
     _write_line("  help                          Show this command list.") # Documents discovery.
     _write_line("  clear                         Clear console output.") # Documents output clearing.
     _write_line("  fly [on|off]                  Toggle or set fly mode.") # Documents flight control.
     _write_line("  infinite_health [on|off]      Toggle or set infinite health.") # Documents developer health protection.
     _write_line("  infinite_mana [on|off]        Toggle or set infinite mana.") # Documents developer mana protection.
     _write_line("  infinite_stamina [on|off]     Toggle or set infinite stamina.") # Documents developer stamina protection.
+    _write_line("  biome <ice|river|volcanic>    Fly to a nearby biome preview.")
+    _write_line("  houses [seed|clear]          Preview six medieval house styles.")
+    _write_line("  town / homestead            Visit a nearby natural settlement.")
     _write_line("  time                          Show world time and cycle speed.") # Documents clock inspection.
     _write_line("  time speed <multiplier>       Set cycle speed; 0 pauses, 1 is normal.") # Documents cycle-speed control.
     _write_line("  time set <hour>               Set time directly using 0-24 hours.") # Documents direct time changes.
@@ -302,3 +337,103 @@ func _is_console_toggle_key(key_event: InputEventKey) -> bool: # Recognizes grav
 
 func _write_line(message: String) -> void: # Appends one literal line to console output.
     _output.append_text(message + "\n") # Adds the message and advances to a fresh line.
+
+func _execute_biome_command(arguments: PackedStringArray) -> void:
+    if arguments.size() != 2 or not arguments[1].to_lower() in ["ice", "river", "volcanic"]:
+        _write_line("Usage: biome <ice|river|volcanic>")
+        return
+    var terrain: InfiniteTerrain = get_node_or_null("../World/Terrain") as InfiniteTerrain
+    var world: Node3D = get_node_or_null("../World") as Node3D
+    if _player == null or terrain == null or world == null or not world.visible:
+        _write_line("Biome previews are available in the overworld.")
+        return
+    var cell: Vector2i = Vector2i.ZERO
+    if arguments[1].to_lower() == "river":
+        cell = Vector2i(-1, 0)
+    elif arguments[1].to_lower() == "volcanic":
+        cell = Vector2i(0, -1)
+    var definition: Dictionary = BiomeProfile.region(cell)
+    var point: Vector2 = definition["centre"]
+    if arguments[1].to_lower() == "river":
+        point += Vector2(BiomeProfile.river_x(-320.0, definition["phase"]), -320.0)
+    _player.set_fly_mode_enabled(true) # Safe preview travel while destination terrain streams in.
+    var altitude: float = maxf(terrain.get_height_at(point), terrain.get_water_level_at(point)) + 110.0
+    _player.global_position = terrain.world_to_local_position(Vector3(point.x, altitude, point.y))
+    _player.velocity = Vector3.ZERO
+    _write_line("Visiting %s biome. Fly mode enabled; allow nearby terrain to load." % arguments[1].to_lower())
+
+func _execute_houses_command(arguments: PackedStringArray) -> void:
+    var world: Node3D = get_node_or_null("../World") as Node3D
+    var terrain: InfiniteTerrain = get_node_or_null("../World/Terrain") as InfiniteTerrain
+    if _player == null or terrain == null or world == null or not world.visible:
+        _write_line("House previews are available in the overworld.")
+        return
+    if arguments.size() > 2 or (arguments.size() == 2 and arguments[1] != "clear" and not arguments[1].is_valid_int()):
+        _write_line("Usage: houses [integer seed|clear]")
+        return
+    var existing = world.get_node_or_null("HouseShowcase")
+    if existing != null:
+        world.remove_child(existing)
+        existing.queue_free()
+    if arguments.size() == 2 and arguments[1] == "clear":
+        _write_line("House preview cleared.")
+        return
+    var seed_value: int = int(arguments[1]) if arguments.size() == 2 else 42
+    var showcase = HouseShowcase.new()
+    showcase.name = "HouseShowcase"
+    world.add_child(showcase)
+    showcase.show_for(_player, terrain, seed_value)
+    _write_line("Generated six medieval houses with seed %d. Fly mode enabled; use 'houses clear' to remove the courtyard." % seed_value)
+
+func _execute_settlement_command(arguments: PackedStringArray) -> void:
+    var world = get_node_or_null("../World") as Node3D
+    var terrain = get_node_or_null("../World/Terrain") as InfiniteTerrain
+    if arguments.size() != 1:
+        _write_line("Usage: town / homestead")
+        return
+    if _player == null or world == null or terrain == null or not world.visible:
+        _write_line("Settlement travel is available in the overworld.")
+        return
+    var position_world = terrain.local_to_world_position(_player.global_position)
+    var sampler = SettlementSampler.for_terrain(terrain)
+    var definition = sampler.find_nearby(Vector2(position_world.x,position_world.z),arguments[0].to_lower())
+    if definition.is_empty():
+        _write_line("No suitable %s found in the nearby search area."%arguments[0].to_lower())
+        return
+    var is_town: bool = arguments[0].to_lower() == "town"
+    var offset = SettlementSampler.rotate(Vector2(0,-100 if is_town else -22),definition["yaw"])
+    var point: Vector2 = definition["position"]+offset
+    var altitude: float = maxf(definition["height"]+(30 if is_town else 9),sampler.ground_height(point)+5)
+    _player.set_fly_mode_enabled(true)
+    _player.global_position = terrain.world_to_local_position(Vector3(point.x,altitude,point.y))
+    _player.rotation.y = definition["yaw"]+PI
+    _player.get_node("Head").rotation.x = -.28
+    _player.velocity = Vector3.ZERO
+    _write_line("Visiting a natural %s. Fly mode enabled; allow the terrain and houses to load."%arguments[0].to_lower())
+
+func _execute_profile_command(arguments: PackedStringArray):
+    var profiler = RuntimeProfiler.instance
+    if profiler == null:
+        _write_line("Profiler is unavailable in this scene.")
+        return
+    var action = arguments[1].to_lower() if arguments.size() > 1 else "status"
+    if action == "mark":
+        var words: Array[String] = []
+        for i in range(2,arguments.size()): words.append(arguments[i])
+        _write_line(profiler.mark(" ".join(words)))
+        return
+    if arguments.size() > 2:
+        _write_line("Usage: profile start|stop|export|status|folder, or profile mark <description>")
+        return
+    match action:
+        "start": _write_line(profiler.start())
+        "stop": _write_line(profiler.stop())
+        "status": _write_line(profiler.status())
+        "export": _write_line(profiler.export_report())
+        "folder":
+            var folder = ProjectSettings.globalize_path("user://performance_reports")
+            if not DirAccess.dir_exists_absolute(folder): _write_line("Export a recording first.")
+            else:
+                var error = OS.shell_open(folder)
+                _write_line(folder if error == OK else "Could not open folder: "+error_string(error)+" · "+folder)
+        _: _write_line("Usage: profile start|stop|export|status|folder, or profile mark <description>")

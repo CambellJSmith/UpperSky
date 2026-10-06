@@ -23,6 +23,9 @@ const SHORE_MAXIMUM_PREFERRED_VARIATION: float = 6.0 # Penalizes steep local ter
 @onready var _developer_console: DeveloperConsole = $DeveloperConsole # Stores the reusable tilde console that controls developer commands.
 
 func _ready() -> void: # Connects environment and developer controls before deferring terrain-backed player initialization.
+    LootSession.records.clear()
+    WayshrineRegistry.activated.clear()
+    $SaveSystem.prepare()
     _player.initialize_environment(_terrain) # Supplies authoritative terrain and water sampling directly to player movement.
     _underwater_view.initialize(_player, _terrain) # Supplies the active camera and water system to the underwater view effect.
     _developer_console.initialize(_player) # Supplies the active player directly without global state or signals.
@@ -31,6 +34,9 @@ func _ready() -> void: # Connects environment and developer controls before defe
 func _initialize_game() -> void: # Builds nearby collision and places the complete player capsule onto dry terrain beside a resolved shoreline.
     _player.set_physics_process(false) # Prevents gravity and movement while terrain collision and spawn placement are unresolved.
     _player.velocity = Vector3.ZERO # Clears inherited movement before positioning the player for the downward collision query.
+    if not $SaveSystem.startup.is_empty():
+        await _restore_saved_game()
+        return
     var spawn_horizontal: Vector2 = _find_shoreline_spawn_horizontal() # Selects deterministic low-slope dry land immediately inland from real generated water.
     var sampled_height: float = _terrain.get_height_at(spawn_horizontal) # Samples terrain only to establish a high collision-query starting point.
     var provisional_position: Vector3 = Vector3(spawn_horizontal.x, sampled_height + PLAYER_SPAWN_PROBE_DISTANCE, spawn_horizontal.y) # Places the player collider well above the expected surface.
@@ -38,9 +44,12 @@ func _initialize_game() -> void: # Builds nearby collision and places the comple
     _terrain.initialize(_player, _dynamic_entities) # Builds the initial collision neighbourhood around the selected shoreline spawn and registers floating-origin participants.
     var resolved_position: Vector3 = await _resolve_player_spawn_position(provisional_position, sampled_height) # Sweeps the actual player capsule down against synchronized collision.
     _player.global_position = resolved_position # Places the player at the highest safe position immediately above the dry terrain surface.
+    $DungeonSystem._initialize_starting_pair(Vector2(resolved_position.x,resolved_position.z))
+    if $DungeonSystem._starting_pair != null: $DungeonSystem._stream_pair($DungeonSystem._starting_pair)
     _player.velocity = Vector3.ZERO # Prevents any pre-spawn velocity from affecting the first active physics frame.
     await get_tree().physics_frame # Lets the physics server register the final player transform before movement begins.
     _player.set_physics_process(true) # Enables normal player movement only after collision-backed placement is complete.
+    $SaveSystem.finish_loading()
 
 func _find_shoreline_spawn_horizontal() -> Vector2: # Finds dry low-slope terrain immediately beside an actual clipped water body.
     var best_position: Vector2 = PLAYER_SPAWN_FALLBACK_HORIZONTAL # Starts with the guaranteed dry origin in case no shoreline transition can be resolved.
@@ -132,3 +141,32 @@ func _cast_player_toward_terrain(downward_motion: Vector3) -> float: # Queries h
     if cast_result.size() < 2: # Handles an invalid or unavailable query result defensively.
         return 1.0 # Reports no resolved collision so the caller can wait and retry.
     return cast_result[0] # Returns the documented maximum safe proportion of the requested motion.
+
+func _restore_saved_game():
+    var save = $SaveSystem
+    var dungeon = $DungeonSystem
+    var state = save.startup
+    if state.starting_pair != null:
+        dungeon._starting_pair = state.starting_pair
+        dungeon._starting_region_coordinate = state.starting_pair.region_coordinate
+    # Build overworld collision before restoring an interior so exits remain usable.
+    var exterior: Vector3 = state.position if state.active_pair == null else state.active_pair.endpoint_a_world_position
+    _player.global_position = exterior
+    _terrain.initialize(_player,_dynamic_entities)
+    _terrain._rebase_world_if_needed()
+    if state.starting_pair != null and dungeon._is_pair_within_distance(state.starting_pair,Vector2(exterior.x,exterior.z),DungeonSystem.PAIR_LOAD_DISTANCE):
+        dungeon._stream_pair(state.starting_pair)
+    if state.active_pair != null:
+        dungeon._stream_pair(state.active_pair)
+        if not dungeon._enter_dungeon(state.active_pair.pair_id,DungeonPairDefinition.Endpoint.A):
+            save.status = "Could not restore cave; returned to its entrance."
+        else:
+            _player.global_position = state.position
+    else:
+        _player.global_position = _terrain.world_to_local_position(state.position)
+    _player.velocity = Vector3.ZERO
+    save.restore_player()
+    await get_tree().physics_frame
+    await get_tree().physics_frame
+    _player.set_physics_process(true)
+    save.finish_loading()

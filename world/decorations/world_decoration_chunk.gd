@@ -1,7 +1,5 @@
-extends StaticBody3D # Streams one chunk of smooth trees and boulders with distance LOD and low-overhead nearby collision.
+extends StaticBody3D # Streams one chunk of faceted trees and boulders with distance LOD and low-overhead nearby collision.
 class_name WorldDecorationChunk # Makes decoration chunks available to the independent decoration streamer.
-
-const DECORATION_CULL_MARGIN: float = 18.0 # Expands MultiMesh bounds around generated object origins for complete silhouettes.
 
 var _placements: Array[WorldDecorationPlacement] = [] # Retains deterministic object transforms for visual LOD rebuilding and nearby collision.
 var _mesh_library: WorldDecorationMeshLibrary # Supplies shared non-cubic meshes and reusable primitive collision resources.
@@ -14,7 +12,7 @@ func configure(placements: Array[WorldDecorationPlacement], mesh_library: WorldD
     _placements = placements # Retains stable transforms so visual LOD and collision always describe the same objects.
     _mesh_library = mesh_library # Retains shared resource access without duplicating geometry or primitive shapes per chunk.
     _lod_level = clampi(lod_level, WorldDecorationMeshLibrary.LOD_NEAR, WorldDecorationMeshLibrary.LOD_FAR) # Stores a valid initial distance tier.
-    _create_visuals() # Batches smooth trees and boulders into a small number of MultiMeshes.
+    _create_visuals() # Batches faceted trees and boulders into a small number of MultiMeshes.
 
 func set_lod_level(lod_level: int) -> void: # Rebuilds only the batched visual buffers when this chunk enters another distance tier.
     var next_lod: int = clampi(lod_level, WorldDecorationMeshLibrary.LOD_NEAR, WorldDecorationMeshLibrary.LOD_FAR) # Restricts the requested level to authored shared meshes.
@@ -36,12 +34,15 @@ func set_collision_active(enabled: bool) -> void: # Creates or releases decorati
 func _create_visuals() -> void: # Groups every placement by shared LOD mesh so dense rendering remains inexpensive.
     if _mesh_library == null or _placements.is_empty(): # Detects chunks without generated objects or mesh resources.
         return # Leaves this chunk empty.
-    var tree_transforms: Array[Transform3D] = [] # Collects every shared tree instance transform.
+    var tree_transforms_by_variant: Dictionary = {}
     var boulder_transforms_by_variant: Dictionary = {} # Groups rounded rocks by the variations retained at this LOD.
     var boulder_sequence: int = 0 # Provides deterministic far-distance rock thinning without extra stored metadata.
     for placement: WorldDecorationPlacement in _placements: # Visits every deterministic object owned by this chunk.
-        if placement.kind == WorldDecorationPlacement.Kind.TREE: # Detects the shared smooth tree family.
-            tree_transforms.append(placement.transform) # Keeps the complete dense tree population visible at every LOD.
+        if placement.kind == WorldDecorationPlacement.Kind.TREE: # Detects the shared tree family.
+            var variant: int = placement.variant
+            if not tree_transforms_by_variant.has(variant):
+                tree_transforms_by_variant[variant] = []
+            tree_transforms_by_variant[variant].append(placement.transform)
             continue # Skips boulder grouping for this placement.
         if _lod_level == WorldDecorationMeshLibrary.LOD_FAR and boulder_sequence % 2 == 1: # Draws half of the very dense rock population at the farthest tier.
             boulder_sequence += 1 # Advances the stable sequence before skipping this visual instance.
@@ -57,7 +58,8 @@ func _create_visuals() -> void: # Groups every placement by shared LOD mesh so d
         var variant_transforms: Array = boulder_transforms_by_variant[visual_variant] # Retrieves the mutable collection for this silhouette.
         variant_transforms.append(placement.transform) # Adds the rounded rock instance transform.
         boulder_transforms_by_variant[visual_variant] = variant_transforms # Stores the updated collection explicitly.
-    _add_multimesh_visual("SmoothTrees_LOD%d" % _lod_level, _mesh_library.get_tree_mesh(_lod_level), tree_transforms) # Creates one draw-batched tree visual.
+    for variant in tree_transforms_by_variant:
+        _add_multimesh_visual("Trees_%d_LOD%d"%[variant,_lod_level],_mesh_library.get_tree_mesh(_lod_level,variant),tree_transforms_by_variant[variant])
     for variant_key: Variant in boulder_transforms_by_variant.keys(): # Visits every boulder silhouette used by this LOD.
         var variant: int = int(variant_key) # Converts the dictionary key into the authored variation index.
         var transforms: Array = boulder_transforms_by_variant[variant] # Retrieves every transform using this shared mesh.
@@ -75,13 +77,9 @@ func _add_multimesh_visual(node_name: String, mesh: Mesh, transforms: Array) -> 
     for instance_index: int in range(transforms.size()): # Writes every generated transform into the GPU instance buffer.
         var instance_transform: Transform3D = transforms[instance_index] # Retrieves one chunk-local transform.
         multi_mesh.set_instance_transform(instance_index, instance_transform) # Applies translation, rotation, and nonuniform scale to the shared mesh.
-        var origin: Vector3 = instance_transform.origin # Reads the object centre or base for visibility bounds.
-        bounds_minimum.x = minf(bounds_minimum.x, origin.x - DECORATION_CULL_MARGIN) # Expands bounds left of the instance.
-        bounds_minimum.y = minf(bounds_minimum.y, origin.y - DECORATION_CULL_MARGIN) # Expands bounds beneath embedded rocks and tree bases.
-        bounds_minimum.z = minf(bounds_minimum.z, origin.z - DECORATION_CULL_MARGIN) # Expands bounds behind the instance.
-        bounds_maximum.x = maxf(bounds_maximum.x, origin.x + DECORATION_CULL_MARGIN) # Expands bounds right of the instance.
-        bounds_maximum.y = maxf(bounds_maximum.y, origin.y + DECORATION_CULL_MARGIN) # Expands bounds above complete canopies.
-        bounds_maximum.z = maxf(bounds_maximum.z, origin.z + DECORATION_CULL_MARGIN) # Expands bounds ahead of the instance.
+        var instance_bounds: AABB = instance_transform * mesh.get_aabb()
+        bounds_minimum = bounds_minimum.min(instance_bounds.position)
+        bounds_maximum = bounds_maximum.max(instance_bounds.end)
     multi_mesh.custom_aabb = AABB(bounds_minimum, bounds_maximum - bounds_minimum) # Prevents costly runtime bounds recalculation for the complete MultiMesh.
     var instance_node: MultiMeshInstance3D = MultiMeshInstance3D.new() # Creates the scene node that submits the batch to rendering.
     instance_node.name = node_name # Gives the generated group a stable diagnostic name.
@@ -105,20 +103,19 @@ func _clear_visuals() -> void: # Releases the current LOD's small set of visual 
 func _create_collisions() -> void: # Creates dense nearby collision with shared Shape3D resources and no CollisionShape3D child nodes.
     if not _collision_shape_owners.is_empty() or _mesh_library == null: # Detects existing collision or unavailable shared resources.
         return # Avoids duplicate shape owners and invalid setup.
-    for placement: WorldDecorationPlacement in _placements: # Visits every generated nearby object.
-        var visual_scale: Vector3 = placement.transform.basis.get_scale() # Extracts positive instance dimensions from the visual transform.
-        var owner_id: int = create_shape_owner(placement) # Creates one lightweight transform owner tied to the retained deterministic placement.
-        var shape_transform: Transform3D = Transform3D.IDENTITY # Starts with an unrotated chunk-local primitive transform.
-        if placement.kind == WorldDecorationPlacement.Kind.TREE: # Creates a narrow solid trunk while leaving foliage non-solid.
-            var trunk_shape: CylinderShape3D = _mesh_library.get_tree_collision_shape(visual_scale) # Reuses one of three shared trunk resources.
-            shape_transform.origin = placement.transform.origin + Vector3.UP * trunk_shape.height * 0.5 # Centres the cylinder above the tree's ground-level origin.
-            shape_owner_add_shape(owner_id, trunk_shape) # Adds the shared smooth cylinder to this object owner.
-        else: # Creates a rounded conservative collision volume for an irregular boulder.
-            var boulder_shape: SphereShape3D = _mesh_library.get_boulder_collision_shape(visual_scale) # Reuses one of three shared rock resources.
-            shape_transform.origin = placement.transform.origin # Aligns collision with the visible embedded boulder centre.
-            shape_owner_add_shape(owner_id, boulder_shape) # Adds the shared rounded volume to this object owner.
-        shape_owner_set_transform(owner_id, shape_transform) # Applies the placement-specific local position without allocating a node.
-        _collision_shape_owners.append(owner_id) # Retains the owner ID for immediate release outside the collision radius.
+    for placement: WorldDecorationPlacement in _placements:
+        if placement.kind == WorldDecorationPlacement.Kind.TREE:
+            for part in _mesh_library.get_tree_collision_parts(placement.variant):
+                var owner_id: int = create_shape_owner(placement)
+                shape_owner_add_shape(owner_id,part["shape"])
+                shape_owner_set_transform(owner_id,placement.transform*part["transform"])
+                _collision_shape_owners.append(owner_id)
+        else:
+            var owner_id: int = create_shape_owner(placement)
+            var shape = _mesh_library.get_boulder_collision_shape(placement.transform.basis.get_scale())
+            shape_owner_add_shape(owner_id,shape)
+            shape_owner_set_transform(owner_id,Transform3D(Basis.IDENTITY,placement.transform.origin))
+            _collision_shape_owners.append(owner_id)
 
 func _clear_collisions() -> void: # Removes all nearby object collision while preserving batched visuals.
     for owner_id: int in _collision_shape_owners: # Visits every currently active tree or rock shape owner.
