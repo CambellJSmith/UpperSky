@@ -2,9 +2,9 @@ extends RefCounted
 class_name SettlementSampler
 
 const HOMESTEAD_CELL_SIZE: float = 768.0
-const HOMESTEAD_CHANCE: float = .10
+const HOMESTEAD_CHANCE: float = .15
 const TOWN_CELL_SIZE: float = 3072.0
-const TOWN_CHANCE: float = .78
+const TOWN_CHANCE: float = .90
 const MIN_TOWN_HOUSES: int = 8
 const CACHE_LIMIT: int = 256
 static var _shared: Dictionary = {}

@@ -7,6 +7,7 @@ const CLEARING_RADIUS: float = 18.0
 const MAXIMUM_HEIGHT_VARIATION: float = 1.5
 const MAXIMUM_GRADE: float = 0.14
 const ATTEMPTS: int = 12
+const CAMP_CHANCE: float = 0.80
 
 var _terrain: InfiniteTerrain
 var _cache: Dictionary[Vector2i, Dictionary] = {}
@@ -22,7 +23,7 @@ func sample_cell(cell: Vector2i) -> Dictionary:
     var rng: RandomNumberGenerator = RandomNumberGenerator.new()
     rng.seed = hash("camp:%d:%d:%d" % [TerrainHeightSampler.WORLD_SEED, cell.x, cell.y])
     var result: Dictionary = {}
-    if rng.randf() < 0.65:
+    if rng.randf() < CAMP_CHANCE:
         for attempt: int in range(ATTEMPTS):
             var point: Vector2 = Vector2(cell) * CELL_SIZE + Vector2(rng.randf_range(48.0, CELL_SIZE - 48.0), rng.randf_range(48.0, CELL_SIZE - 48.0))
             if _is_suitable(point):
@@ -102,7 +103,7 @@ func sample_cell_incremental(cell: Vector2i, scheduler: GenerationScheduler) -> 
     var rng: RandomNumberGenerator = RandomNumberGenerator.new()
     rng.seed = hash("camp:%d:%d:%d" % [TerrainHeightSampler.WORLD_SEED, cell.x, cell.y])
     var result: Dictionary = {}
-    if rng.randf() < 0.65:
+    if rng.randf() < CAMP_CHANCE:
         for attempt: int in range(ATTEMPTS):
             if not await scheduler.checkpoint(): return {}
             var point: Vector2 = Vector2(cell) * CELL_SIZE + Vector2(rng.randf_range(48.0, CELL_SIZE - 48.0), rng.randf_range(48.0, CELL_SIZE - 48.0))
