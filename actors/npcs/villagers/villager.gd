@@ -302,6 +302,7 @@ func _show_corpse():
     # Preserve the last position and let the complete imported skeleton tumble
     # as one physics body instead of snapping into a fixed death animation.
     _ragdoll = RigidBody3D.new()
+    _ragdoll.set_script(load("res://actors/combat/ragdoll_corpse.gd"))
     _ragdoll.name = "RagdollCorpse"
     _ragdoll.collision_layer = 4
     _ragdoll.collision_mask = 1 | 4
