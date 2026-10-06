@@ -29,6 +29,7 @@ func _ready() -> void: # Connects environment and developer controls before defe
     _player.initialize_environment(_terrain) # Supplies authoritative terrain and water sampling directly to player movement.
     _underwater_view.initialize(_player, _terrain) # Supplies the active camera and water system to the underwater view effect.
     _developer_console.initialize(_player) # Supplies the active player directly without global state or signals.
+    $BuildingInteriors.initialize(_player, _terrain)
     _initialize_game.call_deferred() # Starts the collision-synchronized spawn sequence outside the scene-tree ready callback.
 
 func _initialize_game() -> void: # Builds nearby collision and places the complete player capsule onto dry terrain beside a resolved shoreline.

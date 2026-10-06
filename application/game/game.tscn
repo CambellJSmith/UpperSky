@@ -27,6 +27,7 @@
 [ext_resource type="Script" uid="uid://bvljqt7kcqud2" path="res://actors/npcs/populations/water_population.gd" id="32_fish"]
 [ext_resource type="Script" uid="uid://dc0ua1fvc7kmr" path="res://application/ui/world_compass.gd" id="33_compass"]
 [ext_resource type="Script" path="res://application/ui/loading_screen.gd" id="34_loading"]
+[ext_resource type="Script" path="res://application/game/building_interiors.gd" id="35_interiors"]
 
 [node name="Game" type="Node3D" unique_id=1438919531]
 script = ExtResource("1_game")
@@ -96,6 +97,9 @@ offset_right = 800.0
 offset_bottom = 380.0
 text = "Loading world…"
 horizontal_alignment = 1
+
+[node name="BuildingInteriors" type="Node3D" parent="."]
+script = ExtResource("35_interiors")
 
 [node name="PlayerInventoryUi" parent="." unique_id=1144578426 instance=ExtResource("7_inventory_ui")]
 
