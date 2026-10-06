@@ -14,6 +14,9 @@ func _ready() -> void:
 func _start_full_ragdoll() -> void:
     var skeleton := find_child("Skeleton3D", true, false) as Skeleton3D
     if skeleton == null: return
+    freeze = true
+    collision_layer = 0
+    collision_mask = 0
     var simulator := PhysicalBoneSimulator3D.new()
     simulator.name = "FullSkeletonSimulator"
     skeleton.add_child(simulator)
@@ -26,10 +29,13 @@ func _start_full_ragdoll() -> void:
         physical.collision_layer = 4
         physical.collision_mask = 1 | 4
         physical.mass = 0.35 if skeleton.get_bone_parent(index) >= 0 else 1.0
+        var pose := skeleton.get_bone_global_pose(index)
+        physical.position = pose.origin
+        physical.basis = pose.basis
         var shape := CollisionShape3D.new()
         var capsule := CapsuleShape3D.new()
         capsule.radius = 0.11
-        capsule.height = 0.35
+        capsule.height = 0.22
         shape.shape = capsule
         physical.add_child(shape)
         skeleton.add_child(physical)
