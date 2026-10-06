@@ -32,7 +32,7 @@ func _nearest_building() -> Node3D:
         var collection: Dictionary = get_node("../World/Settlements").get(collection_name)
         for root in collection.values():
             if not is_instance_valid(root): continue
-            var candidate := root if root.has_meta("house_parameters") else _nearest_house(root)
+            var candidate: Node3D = root if root.has_meta("house_parameters") else _nearest_house(root)
             if candidate == null: continue
             var distance := _player.global_position.distance_to(candidate.global_position)
             if distance < best_distance:
