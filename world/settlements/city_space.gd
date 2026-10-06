@@ -9,6 +9,7 @@ var house_count := 0
 var resident_count := 0
 var knight_count := 0
 var king_count := 0
+var shadow_count := 0
 
 func build(source: Dictionary) -> void:
     definition = source
@@ -68,6 +69,9 @@ func build(source: Dictionary) -> void:
     var court: Array[Vector2] = [Vector2(-9,-72),Vector2(9,-72),Vector2(9,-67),Vector2(-9,-67)]
     _npc(11,"city_king",source.seed+900001,court,0)
     king_count = 1
+    var shadow_route: Array[Vector2] = [Vector2(-12,-77),Vector2(12,-77),Vector2(12,-74),Vector2(-12,-74)]
+    _npc(12,"city_shadow",source.seed+900050,shadow_route,0)
+    shadow_count = 1
     for i in range(6):
         var patrol: Array[Vector2] = []
         patrol.assign(court if i < 2 else [Vector2(-48,-48),Vector2(48,-48),Vector2(48,96),Vector2(-48,96)])

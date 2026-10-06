@@ -80,7 +80,7 @@ func run():
     while travel.busy: await process_frame
     var city := travel.active
     assert(city.house_count == 52 and city.resident_count == 52)
-    assert(city.king_count == 1 and city.knight_count == 6)
+    assert(city.king_count == 1 and city.knight_count == 6 and city.shadow_count == 1)
     var scenery_batches := 0
     for child in city.get_children():
         if child is MeshInstance3D and child.mesh != null and str(child.name).begins_with("SceneryBatch"):
@@ -90,10 +90,18 @@ func run():
     assert(terrain.process_mode == Node.PROCESS_MODE_DISABLED and not terrain.visible)
     assert(not loading._panel.visible)
     var king: Villager
+    var shadow: Villager
+    var king_total := 0
+    var shadow_total := 0
     var peasants := 0
     for child in city.get_children():
         if not child is Villager: continue
-        if child.model_index == 11: king = child
+        if child.model_index == 11:
+            king = child
+            king_total += 1
+        if child.model_index == 12:
+            shadow = child
+            shadow_total += 1
         if child.model_index in [0,1]: peasants += 1
         if child.model_index == 9: assert(child.affection.score == 11)
         for i in child.route.size():
@@ -101,7 +109,13 @@ func run():
             var b: Vector2 = child.route[(i+1)%child.route.size()]
             for sample in range(21): assert(city.is_walkable(a.lerp(b,sample/20.0)))
     assert(peasants == 52 and king != null and king.affection.score == 100)
+    assert(king_total==1 and shadow_total==1 and shadow.affection.score==100)
+    assert(shadow.get_loot_title()=="Shadow person's belongings")
     for clip in Villager.CLIPS.values():
+        assert(shadow._animation.has_animation("Quaternius/"+clip))
+        shadow._animation.play("Quaternius/"+clip)
+        shadow._animation.advance(.1)
+        for bone in shadow._rig.get_bone_count(): assert(shadow._rig.get_bone_global_pose(bone).origin.is_finite())
         assert(king._animation.has_animation("Quaternius/"+clip))
         king._animation.play("Quaternius/"+clip)
         king._animation.advance(.1)
@@ -111,6 +125,7 @@ func run():
     var encoded = SaveCodec.encode(snapshot)
     assert(SaveCodec.valid(encoded) and save._valid_state(SaveCodec.decode(encoded)))
     king.affection.score = 73
+    shadow.affection.score = 64
     save.ready_to_save = true
     save.folder = "/tmp/upper-sky-city-save-%d"%Time.get_ticks_usec()
     assert(save.save_slot("quick"))
@@ -133,10 +148,11 @@ func run():
     player.set_physics_process(false)
     LootSession.records = disk.loot
     await travel.restore(disk.city)
-    assert(travel.active != null and travel.active.king_count == 1)
+    assert(travel.active != null and travel.active.king_count == 1 and travel.active.shadow_count == 1)
     assert(travel.active.to_local(player.global_position).distance_to(snapshot.city.position) < .1)
     for child in travel.active.get_children():
         if child is Villager and child.model_index == 11: assert(child.affection.score == 73)
+        if child is Villager and child.model_index == 12: assert(child.affection.score == 64)
     var house: Node3D = travel.active.get_node("CityHouse_0")
     await interiors._enter_room(house)
     assert(interiors._active_room != null and player._terrain == null)

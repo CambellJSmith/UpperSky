@@ -54,8 +54,10 @@ Village streets, squares and door paths now belong to `WorldPathNetwork` and `Pa
 
 One third of valid settlement seeds create a city entrance instead of a wilderness village. The exterior has stone curtain walls, crenellated towers, a retained moat, a wooden drawbridge and a stone approach. Simplified roofs and a keep provide a skyline. The regional path network connects to the gate rather than generating invisible exterior house paths.
 
-Walking across the drawbridge loads a separate city space. Each city has 52 varied medieval houses and peasants, a street grid and market square, and a castle with one Crimson King and six knights. Two guards patrol the courtyard; four patrol the city streets. Walk through the city gate to leave. The loading screen stays up until all houses, NPCs, scenery batches and physics have been prepared.
+Walking across the drawbridge loads a separate city space. Each city has 52 varied medieval houses and peasants, a street grid and market square, and a castle with one Crimson King, one Shadow Sentinel and six knights. Two guards patrol the courtyard; four patrol the city streets. Walk through the city gate to leave. The loading screen stays up until all houses, NPCs, scenery batches and physics have been prepared.
 
 Wilderness streaming pauses during city visits; the day/night clock continues. Static scenery is batched by material in 48-metre neighbourhoods, retaining individual building metadata and collisions. City identity, player position, NPC health, affection, inventory and patrol positions persist through saves and visits. Saves inside city houses restore the corresponding room. Construction happens across frames.
 
 Use `city` in the developer console to fly to a nearby natural city exterior. Descend to the approach and cross the drawbridge. `town` and `homestead` remain available. Run `world/settlements/tests/check_city.gd` for city geometry, safe routes, king animations, entry, exit, save files and building interior checks.
+
+The Shadow Sentinel uses the supplied rigged GLB and the shared Quaternius animation pack, baked offline for idle, walk, run, punch, kick and weapon attacks. Each city creates exactly one with a stable identity and a courtyard patrol. It starts neutral at 100 affection; inventory, health, relationships and position use the same persistent city NPC system as the king.

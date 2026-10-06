@@ -22,7 +22,9 @@ func _bake() -> void:
     targets["knight"] = "res://actors/npcs/villagers/models/knight.glb"
     targets["vampire"] = "res://actors/npcs/villagers/models/vampire.glb"
     targets["king"] = "res://actors/npcs/villagers/models/king.glb"
+    targets["shadow_person"] = "res://actors/npcs/villagers/models/shadow_person.glb"
     for character in targets:
+        if "shadow-only" in OS.get_cmdline_user_args() and character != "shadow_person": continue
         if "king-only" in OS.get_cmdline_user_args() and character != "king": continue
         if "wizard-only" in OS.get_cmdline_user_args() and character != "wizard": continue
         if "werewolf-only" in OS.get_cmdline_user_args() and character != "werewolf": continue

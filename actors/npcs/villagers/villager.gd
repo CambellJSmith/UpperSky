@@ -1,11 +1,11 @@
 extends CharacterBody3D
 class_name Villager
 
-const MODEL_PATHS = ["res://actors/npcs/villagers/models/humble_pilgrim.glb","res://actors/npcs/villagers/models/village_weaver.glb","res://actors/npcs/villagers/models/orc.glb","res://actors/npcs/villagers/models/demon.glb","res://actors/npcs/villagers/models/ghost.glb","res://actors/npcs/villagers/models/zombie.glb","res://actors/npcs/villagers/models/fish_man.glb","res://actors/npcs/villagers/models/wizard.glb","res://actors/npcs/villagers/models/werewolf.glb","res://actors/npcs/villagers/models/knight.glb","res://actors/npcs/villagers/models/vampire.glb","res://actors/npcs/villagers/models/king.glb"]
-const LIBRARY_PATHS = ["res://actors/npcs/villagers/animations/humble_pilgrim.res","res://actors/npcs/villagers/animations/village_weaver.res","res://actors/npcs/villagers/animations/orc.res","res://actors/npcs/villagers/animations/demon.res","res://actors/npcs/villagers/animations/ghost.res","res://actors/npcs/villagers/animations/zombie.res","res://actors/npcs/villagers/animations/fish_man.res","res://actors/npcs/villagers/animations/wizard.res","res://actors/npcs/villagers/animations/werewolf.res","res://actors/npcs/villagers/animations/knight.res","res://actors/npcs/villagers/animations/vampire.res","res://actors/npcs/villagers/animations/king.res"]
+const MODEL_PATHS = ["res://actors/npcs/villagers/models/humble_pilgrim.glb","res://actors/npcs/villagers/models/village_weaver.glb","res://actors/npcs/villagers/models/orc.glb","res://actors/npcs/villagers/models/demon.glb","res://actors/npcs/villagers/models/ghost.glb","res://actors/npcs/villagers/models/zombie.glb","res://actors/npcs/villagers/models/fish_man.glb","res://actors/npcs/villagers/models/wizard.glb","res://actors/npcs/villagers/models/werewolf.glb","res://actors/npcs/villagers/models/knight.glb","res://actors/npcs/villagers/models/vampire.glb","res://actors/npcs/villagers/models/king.glb","res://actors/npcs/villagers/models/shadow_person.glb"]
+const LIBRARY_PATHS = ["res://actors/npcs/villagers/animations/humble_pilgrim.res","res://actors/npcs/villagers/animations/village_weaver.res","res://actors/npcs/villagers/animations/orc.res","res://actors/npcs/villagers/animations/demon.res","res://actors/npcs/villagers/animations/ghost.res","res://actors/npcs/villagers/animations/zombie.res","res://actors/npcs/villagers/animations/fish_man.res","res://actors/npcs/villagers/animations/wizard.res","res://actors/npcs/villagers/animations/werewolf.res","res://actors/npcs/villagers/animations/knight.res","res://actors/npcs/villagers/animations/vampire.res","res://actors/npcs/villagers/animations/king.res","res://actors/npcs/villagers/animations/shadow_person.res"]
 const CLIPS = {"idle":"Idle_Loop","walk":"Walk_Loop","run":"Jog_Fwd_Loop","punch":"Punch_Jab","kick":"Kick","weapon_slash":"WeaponSlash","weapon_chop":"WeaponChop","weapon_stab":"WeaponStab"}
 var _loot_record: Dictionary = {}
-const SPECIES = ["human","human","orc","demon","ghost","zombie","fish_man","wizard","werewolf","knight","vampire","human"]
+const SPECIES = ["human","human","orc","demon","ghost","zombie","fish_man","wizard","werewolf","knight","vampire","human","shadow_person"]
 var affection: AffectionState = AffectionState.new()
 var _damage_source: Node3D
 var equipment: NpcEquipment
@@ -544,6 +544,7 @@ func _show_corpse():
 func get_loot_inventory() -> LootStorage:
     return _loot_record.inventory if _loot_record.health.is_dead() else null
 func get_loot_title() -> String:
+    if model_index == 12: return "Shadow person's belongings"
     if model_index == 11: return "King\'s belongings"
     if model_index == VAMPIRE_MODEL: return "Vampire's belongings"
     if model_index == 9: return "Knight's belongings"
