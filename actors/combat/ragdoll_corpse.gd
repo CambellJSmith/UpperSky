@@ -9,6 +9,31 @@ var _floating := false
 func _ready() -> void:
     contact_monitor = true
     max_contacts_reported = 2
+    call_deferred("_start_full_ragdoll")
+
+func _start_full_ragdoll() -> void:
+    var skeleton := find_child("Skeleton3D", true, false) as Skeleton3D
+    if skeleton == null: return
+    var simulator := PhysicalBoneSimulator3D.new()
+    simulator.name = "FullSkeletonSimulator"
+    skeleton.add_child(simulator)
+    for index in range(skeleton.get_bone_count()):
+        var bone_name := skeleton.get_bone_name(index)
+        if bone_name.is_empty(): continue
+        var physical := PhysicalBone3D.new()
+        physical.name = "Ragdoll_%s" % bone_name
+        physical.bone_name = bone_name
+        physical.collision_layer = 4
+        physical.collision_mask = 1 | 4
+        physical.mass = 0.35 if skeleton.get_bone_parent(index) >= 0 else 1.0
+        var shape := CollisionShape3D.new()
+        var capsule := CapsuleShape3D.new()
+        capsule.radius = 0.11
+        capsule.height = 0.35
+        shape.shape = capsule
+        physical.add_child(shape)
+        skeleton.add_child(physical)
+    simulator.physical_bones_start_simulation()
 
 func _unhandled_input(event: InputEvent) -> void:
     if event.is_action_pressed("Interact"):
