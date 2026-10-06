@@ -23,8 +23,8 @@
 [ext_resource type="Script" uid="uid://dax88ugcpr2te" path="res://application/debug/runtime_profiler.gd" id="28_profiler"]
 [ext_resource type="Script" uid="uid://d2ns4v4o3swq4" path="res://application/save/save_system.gd" id="29_save"]
 [ext_resource type="Script" uid="uid://fbrsnuqcwpsp" path="res://application/streaming/generation_scheduler.gd" id="30_scheduler"]
-[ext_resource type="Script" path="res://actors/npcs/populations/volcano_population.gd" id="31_demons"]
-[ext_resource type="Script" path="res://actors/npcs/populations/water_population.gd" id="32_fish"]
+[ext_resource type="Script" uid="uid://c1m0qkb4yttic" path="res://actors/npcs/populations/volcano_population.gd" id="31_demons"]
+[ext_resource type="Script" uid="uid://bvljqt7kcqud2" path="res://actors/npcs/populations/water_population.gd" id="32_fish"]
 
 [node name="Game" type="Node3D" unique_id=1438919531]
 script = ExtResource("1_game")
@@ -40,10 +40,10 @@ script = ExtResource("20_settlements")
 [node name="Villagers" type="Node3D" parent="World" unique_id=1508769642]
 script = ExtResource("21_villagers")
 
-[node name="VolcanoPopulation" type="Node3D" parent="World"]
+[node name="VolcanoPopulation" type="Node3D" parent="World" unique_id=294858438]
 script = ExtResource("31_demons")
 
-[node name="WaterPopulation" type="Node3D" parent="World"]
+[node name="WaterPopulation" type="Node3D" parent="World" unique_id=1531347732]
 script = ExtResource("32_fish")
 
 [node name="Paths" type="Node3D" parent="World" unique_id=1452037469]

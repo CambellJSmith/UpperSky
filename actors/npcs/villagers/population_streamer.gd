@@ -112,14 +112,18 @@ func _refresh_incremental(point: Vector2, scheduler: GenerationScheduler):
         if not nearby:
             for npc in group: remove_child(npc); npc.queue_free()
             _groups.erase(key)
-    for cell in _settlements._towns:
+    for cell in _settlements._towns.keys():
         if not await scheduler.checkpoint(): return
-        var definition: Dictionary = _settlements._towns[cell].get_meta("definition")
+        var town = _settlements._towns.get(cell)
+        if not is_instance_valid(town): continue
+        var definition: Dictionary = town.get_meta("definition")
         if point.distance_to(definition.position) < LOAD_DISTANCE:
             await _spawn_incremental("town:%s"%cell,await _sampler.town_incremental(definition,scheduler),point,scheduler)
-    for cell in _settlements._homes:
+    for cell in _settlements._homes.keys():
         if not await scheduler.checkpoint(): return
+        if not is_instance_valid(_settlements._homes.get(cell)): continue
         var definition = _sampler._settlements.sample_homestead(cell)
+        if definition.is_empty(): continue
         if point.distance_to(definition.position) < LOAD_DISTANCE:
             await _spawn_incremental("home:%s"%cell,await _sampler.home_incremental(definition,scheduler),point,scheduler)
     var centre = Vector2i(floori(point.x/VillagerPopulationSampler.TRAVEL_CELL),floori(point.y/VillagerPopulationSampler.TRAVEL_CELL))
