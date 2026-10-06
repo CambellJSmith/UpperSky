@@ -160,6 +160,8 @@ func _get_terrain_colour(height: float, normal: Vector3, water_level: float, wor
 
     var steepness: float = 1.0 - clampf(normal.y, 0.0, 1.0) # Converts the surface normal into a slope exposure value.
     var rock_blend: float = smoothstep(0.20, 0.58, steepness) # Identifies dramatic walls and cliffs where vegetation should give way to rock.
+    if _height_sampler is SeamlessTerrainHeightSampler:
+        rock_blend = maxf(rock_blend, smoothstep(180.0, 600.0, SeamlessTerrainHeightSampler.rocky_mountain_uplift(world_position)))
     var terrain_colour: Color = elevation_colour.lerp(ROCK_COLOR, rock_blend) # Resolves the ordinary slope-aware terrain colour before shoreline deposition.
 
     var height_above_water: float = height - water_level # Measures signed vertical distance from the local water surface.
