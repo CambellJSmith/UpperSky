@@ -50,17 +50,21 @@ func _refresh_from_vitals() -> void: # Copies the complete player resource state
     if _vitals == null: # Handles calls before game composition supplies the resource model.
         return # Leaves authored defaults visible until initialization completes.
     set_all_resources(_vitals.get_health(), _vitals.get_maximum_health(), _vitals.get_stamina(), _vitals.get_maximum_stamina(), _vitals.get_mana(), _vitals.get_maximum_mana()) # Keeps all displayed resources synchronized with player-owned values.
+    _rings.experience = _vitals.get_experience() / _vitals.get_experience_to_level()
+    _rings.queue_redraw()
     _displayed_revision = _vitals.get_revision() # Records the rendered resource revision.
 
 class ResourceRings extends Control:
     var health := 1.0
     var stamina := 1.0
     var mana := 1.0
+    var experience := 0.0
     func _draw() -> void:
         var centre := Vector2(85, 85)
         _ring(centre, 76, health, Color("d43b3b"))
         _ring(centre, 61, stamina, Color("39bd62"))
         _ring(centre, 46, mana, Color("4d8cff"))
+        _ring(centre, 31, experience, Color("f2f2f2"))
     func _ring(centre: Vector2, radius: float, fraction: float, colour: Color) -> void:
         draw_arc(centre, radius, 0.0, TAU, 96, Color(0.06, 0.07, 0.09, 0.8), 7.0, true)
         if fraction > 0.001:

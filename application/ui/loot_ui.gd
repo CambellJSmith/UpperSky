@@ -146,10 +146,16 @@ func _move(side: int,index: int,amount: int):
     var id: StringName = _lists[side].get_item_metadata(index)
     var source: Object = _storage if side == 0 else _inventory
     var destination: Object = _inventory if side == 0 else _storage
+    var moved_stack: InventoryStack = source.get_stack_at(index)
     var quantity = amount
     if amount == -1:
         quantity = 0
         for i in range(source.get_stack_count()):
             if source.get_stack_at(i).get_item_id() == id: quantity = source.get_stack_at(i).get_quantity()
-    _message.text = "Items moved." if LootStorage.transfer(source,destination,id,quantity) else "Cannot move that quantity. Check your carrying capacity."
+    var moved := LootStorage.transfer(source,destination,id,quantity)
+    if moved and side == 0:
+        var player_vitals = _player.get_node_or_null("PlayerVitals")
+        if player_vitals != null and moved_stack != null and moved_stack.get_unit_weight() >= 1.0:
+            player_vitals.add_experience(minf(15.0, moved_stack.get_unit_weight() * 2.0))
+    _message.text = "Items moved." if moved else "Cannot move that quantity. Check your carrying capacity."
     _refresh()

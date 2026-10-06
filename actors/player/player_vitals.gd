@@ -13,6 +13,8 @@ var _maximum_mana: float = DEFAULT_MAXIMUM_MANA # Stores the authoritative curre
 var _infinite_stamina_enabled: bool = false # Tracks whether developer controls currently prevent stamina from being consumed.
 var _infinite_mana_enabled: bool = false # Tracks whether developer controls currently prevent mana from dropping below maximum.
 var _revision: int = 0 # Increments whenever any displayed resource changes so polling interfaces can refresh without signals.
+var _experience: float = 0.0
+const EXPERIENCE_TO_LEVEL: float = 100.0
 var _health_regen_delay: float = 0.0
 var _last_health: float = HealthState.DEFAULT_MAXIMUM
 const HEALTH_REGEN_DELAY := 3.0
@@ -33,6 +35,12 @@ func get_health_state() -> HealthState: return _health_state
 func heal(amount: float) -> float: return _health_state.heal(amount)
 func is_dead() -> bool: return _health_state.is_dead()
 func get_health_ratio() -> float: return _health_state.get_health_ratio()
+func get_experience() -> float: return _experience
+func get_experience_to_level() -> float: return EXPERIENCE_TO_LEVEL
+func add_experience(amount: float) -> void:
+    if is_finite(amount) and amount > 0.0:
+        _experience = minf(EXPERIENCE_TO_LEVEL, _experience + amount)
+        _revision += 1
 
 func get_health() -> float: # Returns the current health value.
     return _health_state.get_health()

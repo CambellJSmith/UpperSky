@@ -278,6 +278,10 @@ func receive_equipment_hit(hit: EquipmentHit):
     health.receive_equipment_hit(hit)
 func _on_death():
     _loot_record.position = world_position
+    var player = get_tree().get_first_node_in_group("player")
+    if player != null:
+        var vitals = player.get_node_or_null("PlayerVitals")
+        if vitals != null: vitals.add_experience(25.0)
     _show_corpse()
 func _on_health_changed():
     if health.is_dead() or _visual == null or is_zero_approx(_visual.rotation.z): return
