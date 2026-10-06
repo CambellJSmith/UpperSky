@@ -14,12 +14,17 @@ var _infinite_stamina_enabled: bool = false # Tracks whether developer controls 
 var _infinite_mana_enabled: bool = false # Tracks whether developer controls currently prevent mana from dropping below maximum.
 var _revision: int = 0 # Increments whenever any displayed resource changes so polling interfaces can refresh without signals.
 var _health_regen_delay: float = 0.0
+var _last_health: float = HealthState.DEFAULT_MAXIMUM
 const HEALTH_REGEN_DELAY := 3.0
 const HEALTH_REGEN_RATE := 2.0
 
 var _health_state: HealthState = HealthState.new()
 func _init(): _health_state.changed.connect(func(): _revision += 1)
 func _process(delta: float) -> void:
+    var current_health := get_health()
+    if current_health < _last_health:
+        _health_regen_delay = HEALTH_REGEN_DELAY
+    _last_health = current_health
     if _health_regen_delay > 0.0:
         _health_regen_delay -= delta
     elif not is_dead() and get_health() < get_maximum_health():
