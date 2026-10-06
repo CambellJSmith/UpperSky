@@ -112,9 +112,10 @@ func _create_collisions() -> void: # Creates dense nearby collision with shared 
                 _collision_shape_owners.append(owner_id)
         else:
             var owner_id: int = create_shape_owner(placement)
-            var shape = _mesh_library.get_boulder_collision_shape(placement.transform.basis.get_scale())
+            var shape := SphereShape3D.new()
+            shape.radius = _mesh_library.get_boulder_collision_radius(placement.variant)
             shape_owner_add_shape(owner_id,shape)
-            shape_owner_set_transform(owner_id,Transform3D(Basis.IDENTITY,placement.transform.origin))
+            shape_owner_set_transform(owner_id,placement.transform)
             _collision_shape_owners.append(owner_id)
 
 func _clear_collisions() -> void: # Removes all nearby object collision while preserving batched visuals.

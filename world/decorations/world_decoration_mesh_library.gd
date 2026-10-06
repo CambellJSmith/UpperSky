@@ -52,6 +52,9 @@ func get_boulder_collision_shape(visual_scale: Vector3) -> SphereShape3D: # Sele
         bucket = 2 # Uses the largest rounded collision resource.
     return _boulder_collision_shapes[bucket] # Returns the immutable shared primitive resource.
 
+func get_boulder_collision_radius(variant: int) -> float:
+    return 1.08 if posmod(variant, BOULDER_VARIANT_COUNT) == 0 else 1.12
+
 func _build_boulder_mesh(variant: int, lod_level: int) -> ArrayMesh: # Distorts a rounded primitive into one smooth irregular boulder at the requested detail tier.
     var source_sphere: SphereMesh = SphereMesh.new() # Creates a temporary triangulated sphere with stable topology and winding.
     source_sphere.radius = 1.0 # Uses a unit radius before procedural distortion and instance scaling.
