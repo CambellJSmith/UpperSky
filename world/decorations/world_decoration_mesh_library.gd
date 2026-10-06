@@ -53,7 +53,9 @@ func get_boulder_collision_shape(visual_scale: Vector3) -> SphereShape3D: # Sele
     return _boulder_collision_shapes[bucket] # Returns the immutable shared primitive resource.
 
 func get_boulder_collision_radius(variant: int) -> float:
-    return 1.08 if posmod(variant, BOULDER_VARIANT_COUNT) == 0 else 1.12
+    # Keep a small inset from the silhouette so rounded rocks cannot envelop
+    # the player capsule and trap it against their own collision surface.
+    return 0.88 if posmod(variant, BOULDER_VARIANT_COUNT) == 0 else 0.92
 
 func _build_boulder_mesh(variant: int, lod_level: int) -> ArrayMesh: # Distorts a rounded primitive into one smooth irregular boulder at the requested detail tier.
     var source_sphere: SphereMesh = SphereMesh.new() # Creates a temporary triangulated sphere with stable topology and winding.
