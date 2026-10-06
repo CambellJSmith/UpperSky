@@ -21,7 +21,7 @@ func definitions(cell: Vector2i) -> Array[Dictionary]:
     var result: Array[Dictionary] = []
     var rng = RandomNumberGenerator.new()
     rng.seed = hash("fish-man:%s"%cell)
-    for attempt in range(24):
+    for attempt in range(72):
         var centre = (Vector2(cell)+Vector2(rng.randf(),rng.randf()))*CELL_SIZE
         if not near_water(centre) or BiomeProfile.is_lava(centre) or _ground.is_clearing(centre): continue
         for direction in [Vector2.RIGHT,Vector2.DOWN,Vector2.LEFT,Vector2.UP]:
@@ -34,9 +34,12 @@ func definitions(cell: Vector2i) -> Array[Dictionary]:
                 if absf(_ground.ground_height(point+direction)-_ground.ground_height(point)) > .35: safe = false; break
             if safe:
                 var route: Array[Vector2] = [centre,end]
-                result.append({"route":route,"model":6,"role":"fish_man","seed":hash("fish:%s"%cell),"start":0})
-                _remember(cell,result)
-                return result
+                var fish_seed = hash("fish:%s:%d"%[cell, result.size()])
+                result.append({"route":route,"model":6,"role":"fish_man","seed":fish_seed,"start":0})
+                if result.size() >= 3:
+                    _remember(cell,result)
+                    return result
+                break
     _remember(cell,result)
     return result
 func _process(delta: float):
