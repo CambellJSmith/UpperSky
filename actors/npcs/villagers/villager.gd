@@ -276,7 +276,10 @@ func _prepare_mesh(node: Node) -> void:
 
 func get_health_component() -> DamageableHealth: return health
 func receive_equipment_hit(hit: EquipmentHit):
-    health.receive_equipment_hit(hit)
+    if hit == null or health == null: return
+    var applied: float = health.apply_damage(hit.damage)
+    if applied > 0.0:
+        affection.change_score(-applied)
 func _on_death():
     _loot_record.position = world_position
     var player = get_tree().get_first_node_in_group("player")
