@@ -93,7 +93,7 @@ func _unhandled_input(event: InputEvent) -> void: # Resolves explicit first-pers
         return # Leaves the event available to other systems.
     if _camera == null or Input.mouse_mode != Input.MOUSE_MODE_CAPTURED: # Rejects interaction while first-person gameplay input is not actively captured.
         return # Prevents dungeon transitions while inventory or other mouse-visible interfaces are open.
-    if _try_interact_with_door(): # Attempts one dedicated-layer camera raycast and performs the matching transition when a door is targeted.
+    if await _try_interact_with_door(): # Attempts one dedicated-layer camera raycast and performs the matching transition when a door is targeted.
         get_viewport().set_input_as_handled() # Prevents the accepted interaction press from reaching unrelated gameplay systems.
 
 func _try_interact_with_door() -> bool: # Casts a short ray from the active camera and routes a targeted procedural door to entry or exit behavior.
@@ -111,9 +111,15 @@ func _try_interact_with_door() -> bool: # Casts a short ray from the active came
     if not (collider is DungeonDoor): # Defensively rejects unexpected objects that may later share the interaction layer.
         return false # Leaves world state unchanged for non-door interaction targets.
     var door: DungeonDoor = collider as DungeonDoor # Converts the validated target to the strongly typed procedural doorway contract.
+    var loading: LoadingScreen = get_node_or_null("../LoadingScreen")
+    if loading != null: await loading.begin("Entering cave…" if door.is_exterior() else "Leaving cave…")
     if door.is_exterior(): # Detects an overworld endpoint that should enter its shared deterministic interior.
-        return _enter_dungeon(door.get_pair_id(), door.get_endpoint()) # Generates or reconstructs the pair's interior and places the player at the matching inside door.
-    return _exit_dungeon(door.get_pair_id(), door.get_endpoint()) # Returns through the matching side of the currently active pair to its exact exterior endpoint.
+        var entered = _enter_dungeon(door.get_pair_id(), door.get_endpoint()) # Generates or reconstructs the pair's interior and places the player at the matching inside door.
+        if loading != null: loading.finish()
+        return entered
+    var exited = _exit_dungeon(door.get_pair_id(), door.get_endpoint()) # Returns through the matching side of the currently active pair to its exact exterior endpoint.
+    if loading != null: loading.finish()
+    return exited
 
 func _refresh_overworld_pairs(player_horizontal: Vector2) -> void: # Rebuilds the bounded set of pair regions whose endpoints are currently relevant to the exploring player.
     var desired_pair_ids: Dictionary[int, bool] = {} # Records every pair that should remain streamed after this refresh without mutating dictionaries during iteration.

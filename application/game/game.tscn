@@ -25,7 +25,8 @@
 [ext_resource type="Script" uid="uid://fbrsnuqcwpsp" path="res://application/streaming/generation_scheduler.gd" id="30_scheduler"]
 [ext_resource type="Script" uid="uid://c1m0qkb4yttic" path="res://actors/npcs/populations/volcano_population.gd" id="31_demons"]
 [ext_resource type="Script" uid="uid://bvljqt7kcqud2" path="res://actors/npcs/populations/water_population.gd" id="32_fish"]
-[ext_resource type="Script" path="res://application/ui/world_compass.gd" id="33_compass"]
+[ext_resource type="Script" uid="uid://dc0ua1fvc7kmr" path="res://application/ui/world_compass.gd" id="33_compass"]
+[ext_resource type="Script" path="res://application/ui/loading_screen.gd" id="34_loading"]
 
 [node name="Game" type="Node3D" unique_id=1438919531]
 script = ExtResource("1_game")
@@ -77,8 +78,24 @@ script = ExtResource("5_underwater")
 
 [node name="PlayerStatusHud" parent="." unique_id=361196745 instance=ExtResource("6_status_hud")]
 
-[node name="WorldCompass" type="CanvasLayer" parent="."]
+[node name="WorldCompass" type="CanvasLayer" parent="." unique_id=170872532]
 script = ExtResource("33_compass")
+
+[node name="LoadingScreen" type="CanvasLayer" parent="."]
+script = ExtResource("34_loading")
+
+[node name="Panel" type="ColorRect" parent="LoadingScreen"]
+offset_right = 1280.0
+offset_bottom = 720.0
+color = Color(0.015, 0.02, 0.03, 1)
+
+[node name="Label" type="Label" parent="LoadingScreen/Panel"]
+offset_left = 480.0
+offset_top = 340.0
+offset_right = 800.0
+offset_bottom = 380.0
+text = "Loading world…"
+horizontal_alignment = 1
 
 [node name="PlayerInventoryUi" parent="." unique_id=1144578426 instance=ExtResource("7_inventory_ui")]
 

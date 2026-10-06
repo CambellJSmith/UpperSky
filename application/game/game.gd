@@ -32,10 +32,12 @@ func _ready() -> void: # Connects environment and developer controls before defe
     _initialize_game.call_deferred() # Starts the collision-synchronized spawn sequence outside the scene-tree ready callback.
 
 func _initialize_game() -> void: # Builds nearby collision and places the complete player capsule onto dry terrain beside a resolved shoreline.
+    await $LoadingScreen.begin("Loading world…")
     _player.set_physics_process(false) # Prevents gravity and movement while terrain collision and spawn placement are unresolved.
     _player.velocity = Vector3.ZERO # Clears inherited movement before positioning the player for the downward collision query.
     if not $SaveSystem.startup.is_empty():
         await _restore_saved_game()
+        $LoadingScreen.finish()
         return
     var spawn_horizontal: Vector2 = _find_shoreline_spawn_horizontal() # Selects deterministic low-slope dry land immediately inland from real generated water.
     var sampled_height: float = _terrain.get_height_at(spawn_horizontal) # Samples terrain only to establish a high collision-query starting point.
@@ -50,6 +52,7 @@ func _initialize_game() -> void: # Builds nearby collision and places the comple
     await get_tree().physics_frame # Lets the physics server register the final player transform before movement begins.
     _player.set_physics_process(true) # Enables normal player movement only after collision-backed placement is complete.
     $SaveSystem.finish_loading()
+    $LoadingScreen.finish()
 
 func _find_shoreline_spawn_horizontal() -> Vector2: # Finds dry low-slope terrain immediately beside an actual clipped water body.
     var best_position: Vector2 = PLAYER_SPAWN_FALLBACK_HORIZONTAL # Starts with the guaranteed dry origin in case no shoreline transition can be resolved.
