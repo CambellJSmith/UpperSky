@@ -77,7 +77,7 @@ func snapshot() -> Dictionary:
     var stacks = []
     for i in range(inventory.get_stack_count()): stacks.append(inventory.get_stack_at(i))
     var clock = get_tree().get_first_node_in_group(DayNightCycle.GROUP_NAME)
-    return {"position":player.global_position if dungeon._active_dungeon != null else terrain.local_to_world_position(player.global_position),"yaw":player.rotation.y,"pitch":player._pitch,"inventory":stacks,"equipment":String(player.get_node("PlayerEquipment").get_equipped_item_id()),"vitals":[vitals.get_health(),vitals.get_maximum_health(),vitals.get_stamina(),vitals.get_maximum_stamina(),vitals.get_mana(),vitals.get_maximum_mana()],"time":clock.get_time_of_day_hours(),"time_speed":clock.get_speed_multiplier(),"loot":LootSession.records,"shrines":WayshrineRegistry.activated,"starting_pair":dungeon._starting_pair,"active_pair":dungeon._active_pair}
+    return {"position":player.global_position if dungeon._active_dungeon != null else terrain.local_to_world_position(player.global_position),"yaw":player.rotation.y,"pitch":player._pitch,"inventory":stacks,"equipment":String(player.get_node("PlayerEquipment").get_equipped_item_id()),"vitals":[vitals.get_health(),vitals.get_maximum_health(),vitals.get_stamina(),vitals.get_maximum_stamina(),vitals.get_mana(),vitals.get_maximum_mana(),vitals.get_experience()],"time":clock.get_time_of_day_hours(),"time_speed":clock.get_speed_multiplier(),"loot":LootSession.records,"shrines":WayshrineRegistry.activated,"starting_pair":dungeon._starting_pair,"active_pair":dungeon._active_pair}
 
 func save_slot(slot: String = "current") -> bool:
     if slot not in ["current","quick"]: return _fail("Use current or quick as the save slot.")
@@ -135,7 +135,7 @@ func _valid_state(s) -> bool:
     if not s is Dictionary: return false
     for key in ["position","yaw","pitch","inventory","equipment","vitals","time","time_speed","loot","shrines","starting_pair","active_pair"]:
         if not s.has(key): return false
-    if not s.position is Vector3 or not s.inventory is Array or not s.equipment is String or not s.vitals is Array or s.vitals.size() != 6 or not s.loot is Dictionary or not s.shrines is Dictionary: return false
+    if not s.position is Vector3 or not s.inventory is Array or not s.equipment is String or not s.vitals is Array or (s.vitals.size() != 6 and s.vitals.size() != 7) or not s.loot is Dictionary or not s.shrines is Dictionary: return false
     for n in [s.yaw,s.pitch,s.time,s.time_speed]+s.vitals:
         if not (n is int or n is float) or not is_finite(n): return false
     if s.time < 0 or s.time >= 24 or s.time_speed < 0 or s.time_speed > DayNightCycle.MAXIMUM_SPEED_MULTIPLIER: return false
@@ -171,6 +171,7 @@ func restore_player():
     vitals.set_stamina(startup.vitals[2])
     vitals.set_maximum_mana(startup.vitals[5])
     vitals.set_mana(startup.vitals[4])
+    if startup.vitals.size() >= 7: vitals.add_experience(startup.vitals[6])
     player.get_node("PlayerInventory").restore_stacks(startup.inventory)
     player.get_node("PlayerEquipment").unequip()
     if not startup.equipment.is_empty(): player.get_node("PlayerEquipment").equip_item(StringName(startup.equipment))
