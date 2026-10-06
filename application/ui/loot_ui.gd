@@ -103,6 +103,8 @@ func _ray_target() -> Node3D:
         if node.has_method("get_loot_inventory"):
             if node.is_visible_in_tree() and node.can_process() and node.get_loot_inventory() != null: return node
             return null
+        if node.has_meta("loot_target") and is_instance_valid(node.get_meta("loot_target")):
+            return node.get_meta("loot_target")
         node = node.get_parent()
     return null
 func open_loot(target: Node3D):

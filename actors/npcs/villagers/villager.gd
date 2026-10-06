@@ -23,6 +23,7 @@ var _terrain: InfiniteTerrain
 var _sampler: SettlementSampler
 var _rng = RandomNumberGenerator.new()
 var _visual: Node3D
+var _ragdoll: RigidBody3D
 var _animation: AnimationPlayer
 var _rig: Skeleton3D
 var _feet: Array[int] = []
@@ -298,12 +299,29 @@ func _on_health_changed():
 func _show_corpse():
     velocity = Vector3.ZERO
     _animation.stop()
-    _visual.rotation.z = PI*.5
-    _visual.position = Vector3(.65,.28,0)
-    var shape = BoxShape3D.new()
-    shape.size = Vector3(1.65,.48,.70)
-    _corpse_collider.set_deferred("shape",shape)
-    _corpse_collider.set_deferred("position",Vector3(0,.25,0))
+    # Preserve the last position and let the complete imported skeleton tumble
+    # as one physics body instead of snapping into a fixed death animation.
+    _ragdoll = RigidBody3D.new()
+    _ragdoll.name = "RagdollCorpse"
+    _ragdoll.collision_layer = 4
+    _ragdoll.collision_mask = 1 | 4
+    _ragdoll.set_meta("loot_target", self)
+    _ragdoll.global_transform = global_transform
+    get_parent().add_child(_ragdoll)
+    remove_child(_visual)
+    _ragdoll.add_child(_visual)
+    _visual.position = Vector3.ZERO
+    _visual.rotation = Vector3.ZERO
+    var collider := CollisionShape3D.new()
+    var shape := CapsuleShape3D.new()
+    shape.radius = .30
+    shape.height = 1.7
+    collider.shape = shape
+    collider.position.y = .82
+    _ragdoll.add_child(collider)
+    _corpse_collider.set_deferred("disabled", true)
+    _ragdoll.apply_central_impulse(Vector3(_rng.randf_range(-.8,.8), .8, _rng.randf_range(-.8,.8)))
+    _ragdoll.apply_torque_impulse(Vector3(_rng.randf_range(-1.2,1.2), _rng.randf_range(-.7,.7), _rng.randf_range(-1.2,1.2)))
 
 func get_loot_inventory() -> LootStorage:
     return _loot_record.inventory if _loot_record.health.is_dead() else null
