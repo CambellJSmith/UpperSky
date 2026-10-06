@@ -13,9 +13,17 @@ var _maximum_mana: float = DEFAULT_MAXIMUM_MANA # Stores the authoritative curre
 var _infinite_stamina_enabled: bool = false # Tracks whether developer controls currently prevent stamina from being consumed.
 var _infinite_mana_enabled: bool = false # Tracks whether developer controls currently prevent mana from dropping below maximum.
 var _revision: int = 0 # Increments whenever any displayed resource changes so polling interfaces can refresh without signals.
+var _health_regen_delay: float = 0.0
+const HEALTH_REGEN_DELAY := 3.0
+const HEALTH_REGEN_RATE := 2.0
 
 var _health_state: HealthState = HealthState.new()
 func _init(): _health_state.changed.connect(func(): _revision += 1)
+func _process(delta: float) -> void:
+    if _health_regen_delay > 0.0:
+        _health_regen_delay -= delta
+    elif not is_dead() and get_health() < get_maximum_health():
+        heal(HEALTH_REGEN_RATE * delta)
 func get_health_state() -> HealthState: return _health_state
 func heal(amount: float) -> float: return _health_state.heal(amount)
 func is_dead() -> bool: return _health_state.is_dead()
@@ -72,7 +80,9 @@ func set_infinite_mana_enabled(enabled: bool) -> void: # Enables or disables aut
         _set_mana_internal(_maximum_mana) # Restores mana to maximum through the shared revision-tracked mutation path.
 
 func apply_damage(amount: float) -> float: # Removes positive health through the existing clamped revision-tracked player resource model and reports actual damage applied.
-    return _health_state.apply_damage(amount)
+    var applied := _health_state.apply_damage(amount)
+    if applied > 0.0: _health_regen_delay = HEALTH_REGEN_DELAY
+    return applied
 
 func set_health(value: float) -> void: # Changes current health while respecting its current maximum and developer protection state.
     _health_state.set_health(value)
