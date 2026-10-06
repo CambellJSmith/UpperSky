@@ -7,6 +7,7 @@
 [ext_resource type="Script" uid="uid://xtovjmrr8unn" path="res://application/effects/underwater_view.gd" id="5_underwater"]
 [ext_resource type="PackedScene" path="res://application/ui/player_status_hud.tscn" id="6_status_hud"]
 [ext_resource type="PackedScene" path="res://application/ui/player_inventory_ui.tscn" id="7_inventory_ui"]
+[ext_resource type="Script" path="res://application/ui/loot_ui.gd" id="36_loot_ui"]
 [ext_resource type="Script" uid="uid://dy85mo17u2opd" path="res://application/game/starting_inventory.gd" id="8_starting_inventory"]
 [ext_resource type="Script" uid="uid://dc7bghg4efp7k" path="res://world/decorations/world_decoration_streamer.gd" id="9_decorations"]
 [ext_resource type="Script" uid="uid://bm273wfofxgol" path="res://world/vegetation/ground_flora_streamer.gd" id="10_flora"]
@@ -102,6 +103,9 @@ horizontal_alignment = 1
 script = ExtResource("35_interiors")
 
 [node name="PlayerInventoryUi" parent="." unique_id=1144578426 instance=ExtResource("7_inventory_ui")]
+
+[node name="LootUI" type="CanvasLayer" parent="."]
+script = ExtResource("36_loot_ui")
 
 [node name="DeveloperConsole" type="CanvasLayer" parent="." unique_id=938133770]
 script = ExtResource("4_console")

@@ -15,7 +15,7 @@ func initialize(player: FirstPersonPlayer, terrain: InfiniteTerrain) -> void:
     _terrain = terrain
 
 func _unhandled_input(event: InputEvent) -> void:
-    if _busy or not event.is_action_pressed("interact"): return
+    if _busy or not event.is_action_pressed("Interact"): return
     if _active_room != null:
         _leave_room()
         get_viewport().set_input_as_handled()
