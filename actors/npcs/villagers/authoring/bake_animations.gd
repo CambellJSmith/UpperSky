@@ -16,8 +16,19 @@ func _bake() -> void:
     var neutral = _sample_globals(source_rig,source_player.get_animation("A_TPose"),0,source_transform)
     var clips = ["Idle_Loop","Walk_Loop","Jog_Fwd_Loop","Sprint_Loop","Punch_Jab","Punch_Cross"]
     DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUTPUT_DIRECTORY))
-    for character in TARGETS:
-        var target: Node3D = load(TARGETS[character]).instantiate()
+    var targets := TARGETS.duplicate()
+    targets["wizard"] = "res://actors/npcs/villagers/models/wizard.glb"
+    targets["werewolf"] = "res://actors/npcs/villagers/models/werewolf.glb"
+    targets["knight"] = "res://actors/npcs/villagers/models/knight.glb"
+    targets["vampire"] = "res://actors/npcs/villagers/models/vampire.glb"
+    targets["king"] = "res://actors/npcs/villagers/models/king.glb"
+    for character in targets:
+        if "king-only" in OS.get_cmdline_user_args() and character != "king": continue
+        if "wizard-only" in OS.get_cmdline_user_args() and character != "wizard": continue
+        if "werewolf-only" in OS.get_cmdline_user_args() and character != "werewolf": continue
+        if "knight-only" in OS.get_cmdline_user_args() and character != "knight": continue
+        if "vampire-only" in OS.get_cmdline_user_args() and character != "vampire": continue
+        var target: Node3D = load(targets[character]).instantiate()
         var rig: Skeleton3D = target.find_children("*","Skeleton3D",true,false)[0]
         var player: AnimationPlayer = target.find_child("AnimationPlayer",true,false)
         if player == null:

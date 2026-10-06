@@ -54,9 +54,7 @@ static func _get_horizontal_meander(world_x: float) -> float: # Offsets east-wes
     return broad_curve + regional_curve + local_curve # Combines every horizontal meander scale into one continuous offset.
 
 static func get_wear_mask(position: Vector2, terrain: InfiniteTerrain = null) -> float:
-    var base = get_wilderness_wear_mask(position)
-    return maxf(base,WorldPathNetwork.for_terrain(terrain).get_local_mask(position)) if terrain != null else base
+    return WorldPathNetwork.for_terrain(terrain).get_local_mask(position) if terrain != null else 0.0
 
 static func get_grass_suppression(position: Vector2, terrain: InfiniteTerrain = null) -> float:
-    var base = get_wilderness_grass_suppression(position)
-    return maxf(base,WorldPathNetwork.for_terrain(terrain).get_local_mask(position,true)) if terrain != null else base
+    return WorldPathNetwork.for_terrain(terrain).get_local_mask(position,true) if terrain != null else 0.0

@@ -4,12 +4,14 @@ class_name GenerationScheduler
 signal frame_started
 const FRAME_BUDGET_US = 3000
 const WORKER_LIMIT = 2
+const PRIORITY_AGING_MS = 120
 static var instance: GenerationScheduler
 class Ticket extends RefCounted:
 	signal resumed
 	var sequence = 0
 	var priority = 2
 	var owner: Node
+	var queued_at_ms = 0
 
 var active_owner: Node
 var active_priority = 2
@@ -43,8 +45,12 @@ func _process(_delta):
 			_workers.erase(job)
 			stale_jobs += 1
 			continue
-		if not WorkerThreadPool.is_task_completed(job.id): continue
-		WorkerThreadPool.wait_for_task_completion(job.id)
+		# Joining consumes the pool ID. Retain the result, not a live task ID,
+		# while its owner is paused during travel or waiting for a frame budget.
+		if not job.get("joined",false):
+			if not WorkerThreadPool.is_task_completed(job.id): continue
+			WorkerThreadPool.wait_for_task_completion(job.id)
+			job["joined"] = true
 		if not is_instance_valid(job.owner):
 			_workers.erase(job)
 			stale_jobs += 1
@@ -57,13 +63,24 @@ func _process(_delta):
 		completed_jobs += 1
 	var waiters = _waiters
 	_waiters = []
-	waiters.sort_custom(func(a,b): return a.priority < b.priority if a.priority != b.priority else a.sequence < b.sequence)
+	var now_ms := Time.get_ticks_msec()
+	# Long regional jobs must not starve terrain/decorations queued at a lower
+	# priority. Waiting raises urgency; a resumed job's next ticket starts fresh.
+	waiters.sort_custom(func(a,b):
+		var urgency_a: int = a.priority-int((now_ms-a.queued_at_ms)/PRIORITY_AGING_MS)
+		var urgency_b: int = b.priority-int((now_ms-b.queued_at_ms)/PRIORITY_AGING_MS)
+		return urgency_a < urgency_b if urgency_a != urgency_b else a.sequence < b.sequence
+	)
 	for ticket in waiters:
+		if typeof(ticket.owner) == TYPE_OBJECT and not is_instance_valid(ticket.owner):
+			# Let checkpoint return false to unwind work owned by a removed node.
+			ticket.resumed.emit()
+			continue
 		if Time.get_ticks_usec() >= _deadline or (is_instance_valid(ticket.owner) and not ticket.owner.can_process()):
 			_waiters.append(ticket)
 			continue
 		active_priority = ticket.priority
-		active_owner = ticket.owner
+		active_owner = ticket.owner if is_instance_valid(ticket.owner) else null
 		ticket.resumed.emit()
 	active_priority = 2
 	active_owner = null
@@ -73,20 +90,27 @@ func _process(_delta):
 
 func checkpoint(owner: Node = null) -> bool:
 	if owner == null: owner = active_owner
+	var had_owner := is_instance_valid(owner)
 	while not _closing and (Time.get_ticks_usec() >= _deadline or (owner != null and is_instance_valid(owner) and not owner.can_process())):
 		var ticket = Ticket.new()
 		ticket.sequence = _ticket_sequence
+		ticket.queued_at_ms = Time.get_ticks_msec()
 		_ticket_sequence += 1
 		ticket.priority = active_priority
 		ticket.owner = owner
 		_waiters.append(ticket)
 		await ticket.resumed
-	return not _closing and (owner == null or is_instance_valid(owner))
+	return not _closing and (not had_owner or is_instance_valid(owner))
 
-func has_worker_room() -> bool: return not _closing and _workers.size() < WORKER_LIMIT
+func has_worker_room(background: bool = false) -> bool:
+	if _closing or _workers.size() >= WORKER_LIMIT: return false
+	if background:
+		for job in _workers:
+			if job.get("background",false): return false
+	return true
 
-func submit(owner: Node, generate: Callable, apply: Callable) -> bool:
-	if not has_worker_room(): return false
+func submit(owner: Node, generate: Callable, apply: Callable, background: bool = false) -> bool:
+	if not has_worker_room(background): return false
 	var box = [null]
 	var id = WorkerThreadPool.add_task(func():
 		var started = Time.get_ticks_usec()
@@ -94,14 +118,20 @@ func submit(owner: Node, generate: Callable, apply: Callable) -> bool:
 		box[0] = {"data":data,"duration_us":Time.get_ticks_usec()-started}
 	,false,"World generation")
 	if id < 0: return false
-	_workers.append({"id":id,"owner":owner,"generator":generate.get_object(),"apply":apply,"box":box})
+	_workers.append({"id":id,"owner":owner,"generator":generate.get_object(),"apply":apply,"box":box,"background":background})
 	return true
 
 func _exit_tree():
 	_closing = true
-	if instance == self: instance = null
+	# tree_exiting is emitted after this callback. Cancel private samplers now,
+	# before joining them, rather than waiting on a signal that cannot fire yet.
+	for job in _workers:
+		var generator = job.get("generator")
+		if is_instance_valid(generator) and generator.has_method("cancel"): generator.cancel()
 	for ticket in _waiters.duplicate(): ticket.resumed.emit()
 	_waiters.clear()
 	frame_started.emit()
-	for job in _workers: WorkerThreadPool.wait_for_task_completion(job.id)
+	for job in _workers:
+		if not job.get("joined",false): WorkerThreadPool.wait_for_task_completion(job.id)
 	_workers.clear()
+	if instance == self: instance = null

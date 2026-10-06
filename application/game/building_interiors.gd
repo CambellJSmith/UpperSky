@@ -28,6 +28,9 @@ func _unhandled_input(event: InputEvent) -> void:
 func _nearest_building() -> Node3D:
     var best: Node3D
     var best_distance := INTERACTION_DISTANCE
+    var cities: CityTravel = get_node_or_null("../CityTravel")
+    if cities != null and cities.active != null:
+        return _nearest_house(cities.active)
     for collection_name in ["_homes", "_towns"]:
         var collection: Dictionary = get_node("../World/Settlements").get(collection_name)
         for root in collection.values():
@@ -45,7 +48,9 @@ func _nearest_house(town: Node3D) -> Node3D:
     var distance := INTERACTION_DISTANCE
     for child in town.get_children():
         if child.has_meta("house_parameters"):
-            var value := _player.global_position.distance_to(child.global_position)
+            var parameters: Dictionary = child.get_meta("house_parameters")
+            var door: Vector3 = child.to_global(Vector3(0,1,-float(parameters.depth)*.5-.8))
+            var value := _player.global_position.distance_to(door)
             if value < distance: best = child; distance = value
     return best
 
@@ -56,6 +61,7 @@ func _enter_room(exterior: Node3D) -> void:
     _active_exterior = exterior
     _active_world_position = _terrain.local_to_world_position(exterior.global_position)
     var parameters: Dictionary = exterior.get_meta("house_parameters", {"width": 8.0, "depth": 8.0, "floors": 1})
+    _active_world_position = _terrain.local_to_world_position(exterior.to_global(Vector3(0,1,-float(parameters.depth)*.5-2)))
     _active_room = _build_room(parameters)
     add_child(_active_room)
     _player.set_physics_process(false)
@@ -74,8 +80,9 @@ func _leave_room() -> void:
     if loading != null: await loading.begin("Leaving building…")
     _active_room.queue_free()
     _active_room = null
-    _player.initialize_environment(_terrain)
-    _player.global_position = _terrain.world_to_local_position(_active_world_position + Vector3(0.0, 1.2, 2.2))
+    var cities: CityTravel = get_node_or_null("../CityTravel")
+    _player.initialize_environment(null if cities != null and cities.active != null else _terrain)
+    _player.global_position = _terrain.world_to_local_position(_active_world_position)
     await get_tree().physics_frame
     if loading != null: loading.finish()
     _active_exterior = null

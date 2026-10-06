@@ -26,10 +26,25 @@ func _ready() -> void: # Connects environment and developer controls before defe
     LootSession.records.clear()
     WayshrineRegistry.activated.clear()
     $SaveSystem.prepare()
+    var relationships := NpcRelationships.new()
+    relationships.name = "NpcRelationships"
+    add_child(relationships)
     _player.initialize_environment(_terrain) # Supplies authoritative terrain and water sampling directly to player movement.
     _underwater_view.initialize(_player, _terrain) # Supplies the active camera and water system to the underwater view effect.
     _developer_console.initialize(_player) # Supplies the active player directly without global state or signals.
+    var cities := CityTravel.new()
+    cities.name = "CityTravel"
+    add_child(cities)
+    cities.initialize(_player,_terrain)
     $BuildingInteriors.initialize(_player, _terrain)
+    var ferries := FerrySystem.new()
+    ferries.name = "Ferries"
+    ferries.initialize(_terrain,_player)
+    $World.add_child(ferries)
+    var ferry_ui := FerryInteraction.new()
+    ferry_ui.name = "FerryInteraction"
+    ferry_ui.initialize(_player)
+    add_child(ferry_ui)
     _initialize_game.call_deferred() # Starts the collision-synchronized spawn sequence outside the scene-tree ready callback.
 
 func _initialize_game() -> void: # Builds nearby collision and places the complete player capsule onto dry terrain beside a resolved shoreline.
@@ -170,6 +185,9 @@ func _restore_saved_game():
         _player.global_position = _terrain.world_to_local_position(state.position)
     _player.velocity = Vector3.ZERO
     save.restore_player()
+    if not state.get("city",{}).is_empty():
+        await $CityTravel.restore(state.city)
+        _player.rotation.y = state.yaw
     await get_tree().physics_frame
     await get_tree().physics_frame
     _player.set_physics_process(true)

@@ -7,6 +7,21 @@ const BILLBOARD_VISUAL_PATH: NodePath = NodePath("BillboardVisual") # Defines th
 @onready var _billboard_visual: MeshInstance3D = get_node_or_null(BILLBOARD_VISUAL_PATH) as MeshInstance3D # Resolves the one required billboard mesh used for NPC character presentation.
 
 var affection: AffectionState = AffectionState.new()
+@export var species := "human"
+@export var social_id := ""
+var _social_record: Dictionary = {}
+func get_social_record() -> Dictionary: return _social_record
+func get_default_affection() -> float: return AffectionState.starting_score(species)
+func get_relationship_species() -> String: return species
+func get_social_space() -> Object:
+    var ancestor := get_parent()
+    while ancestor != null:
+        if ancestor is CitySpace or ancestor is ProceduralDungeonWorld: return ancestor
+        ancestor = ancestor.get_parent()
+    return get_world_3d()
+func get_npc_affection(other: Node): return NpcRelationships.get_score(self,other)
+func set_npc_affection(other: Node, value: float) -> bool: return NpcRelationships.set_score(self,other,value)
+func change_npc_affection(other: Node, amount: float) -> bool: return NpcRelationships.change_score(self,other,amount)
 func get_affection() -> float: return affection.get_score()
 func set_affection(value: float): affection.set_score(value)
 func change_affection(amount: float): affection.change_score(amount)
@@ -14,9 +29,13 @@ func change_affection(amount: float): affection.change_score(amount)
 var combat: NpcCombat
 var health: DamageableHealth
 func get_health_component() -> DamageableHealth: return health
-func receive_equipment_hit(hit: EquipmentHit): health.receive_equipment_hit(hit)
+func receive_equipment_hit(hit: EquipmentHit):
+    if hit == null or health == null: return
+    NpcRelationships.damage_received(self,hit.source,health.apply_damage(hit.damage))
 
 func _ready() -> void: # Registers the NPC and validates that its scene obeys the billboard-only character presentation contract.
+    var key := social_id if not social_id.is_empty() else "billboard:%s:%s"%[scene_file_path,get_path()]
+    _social_record = LootSession.get_record(key,hash(key),true)
     health = DamageableHealth.new()
     health.name = "Health"
     add_child(health)

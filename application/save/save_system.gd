@@ -68,6 +68,8 @@ func _notification(what):
         get_tree().quit()
 
 func snapshot() -> Dictionary:
+    for npc in get_tree().get_nodes_in_group("npc"):
+        if npc is Villager and npc._space == null: npc.persist_journey()
     var game = get_parent()
     var player = game.get_node("DynamicEntities/Player")
     var terrain = game.get_node("World/Terrain")
@@ -77,7 +79,9 @@ func snapshot() -> Dictionary:
     var stacks = []
     for i in range(inventory.get_stack_count()): stacks.append(inventory.get_stack_at(i))
     var clock = get_tree().get_first_node_in_group(DayNightCycle.GROUP_NAME)
-    return {"position":player.global_position if dungeon._active_dungeon != null else terrain.local_to_world_position(player.global_position),"yaw":player.rotation.y,"pitch":player._pitch,"inventory":stacks,"equipment":String(player.get_node("PlayerEquipment").get_equipped_item_id()),"vitals":[vitals.get_health(),vitals.get_maximum_health(),vitals.get_stamina(),vitals.get_maximum_stamina(),vitals.get_mana(),vitals.get_maximum_mana(),vitals.get_experience()],"time":clock.get_time_of_day_hours(),"time_speed":clock.get_speed_multiplier(),"loot":LootSession.records,"shrines":WayshrineRegistry.activated,"starting_pair":dungeon._starting_pair,"active_pair":dungeon._active_pair}
+    var cities: CityTravel = game.get_node_or_null("CityTravel")
+    var city_state: Dictionary = cities.snapshot() if cities != null else {}
+    return {"city":city_state,"position":city_state.return_position if not city_state.is_empty() else player.global_position if dungeon._active_dungeon != null else player.water_transport.save_position(player) if is_instance_valid(player.water_transport) else terrain.local_to_world_position(player.global_position),"yaw":player.rotation.y,"pitch":player._pitch,"inventory":stacks,"equipment":String(player.get_node("PlayerEquipment").get_equipped_item_id()),"vitals":[vitals.get_health(),vitals.get_maximum_health(),vitals.get_stamina(),vitals.get_maximum_stamina(),vitals.get_mana(),vitals.get_maximum_mana(),vitals.get_experience()],"time":clock.get_time_of_day_hours(),"time_speed":clock.get_speed_multiplier(),"loot":LootSession.records,"shrines":WayshrineRegistry.activated,"starting_pair":dungeon._starting_pair,"active_pair":dungeon._active_pair}
 
 func save_slot(slot: String = "current") -> bool:
     if slot not in ["current","quick"]: return _fail("Use current or quick as the save slot.")
@@ -141,11 +145,34 @@ func _valid_state(s) -> bool:
     if s.time < 0 or s.time >= 24 or s.time_speed < 0 or s.time_speed > DayNightCycle.MAXIMUM_SPEED_MULTIPLIER: return false
     for i in [0,2,4]:
         if s.vitals[i+1] <= 0 or s.vitals[i] < 0 or s.vitals[i] > s.vitals[i+1]: return false
+    if s.has("city"):
+        if not s.city is Dictionary: return false
+        if not s.city.is_empty():
+            for key in ["cell","position","yaw","return_position","return_yaw"]:
+                if not s.city.has(key): return false
+            if not s.city.cell is Vector2i or not s.city.position is Vector3 or not s.city.return_position is Vector3: return false
+            if not s.city.position.is_finite() or not s.city.return_position.is_finite(): return false
+            if not (s.city.yaw is float or s.city.yaw is int) or not (s.city.return_yaw is float or s.city.return_yaw is int): return false
+            if not is_finite(s.city.yaw) or not is_finite(s.city.return_yaw): return false
+            var room = s.city.get("room",{})
+            if not room is Dictionary: return false
+            if not room.is_empty():
+                if not room.get("house") is String or not room.house.begins_with("CityHouse_") or "/" in room.house: return false
+                if not room.get("position") is Vector3 or not room.position.is_finite(): return false
     for stack in s.inventory:
         if not stack is InventoryStack: return false
     for record in s.loot.values():
         if not record is Dictionary or not record.get("inventory") is LootStorage or not record.get("health") is HealthState: return false
         if record.has("affection") and not record.affection is AffectionState: return false
+        if record.has("npc_id") and not record.npc_id is String: return false
+        if record.has("npc_aggressors"):
+            if not record.npc_aggressors is Dictionary: return false
+            for target in record.npc_aggressors:
+                if not target is String or not record.npc_aggressors[target] is bool: return false
+        if record.has("npc_affection"):
+            if not record.npc_affection is Dictionary: return false
+            for target in record.npc_affection:
+                if not target is String or not record.npc_affection[target] is AffectionState: return false
         if record.has("position") and not record.position is Vector3: return false
     for key in s.shrines:
         var shrine = s.shrines[key]

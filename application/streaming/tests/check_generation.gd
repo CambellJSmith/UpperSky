@@ -68,6 +68,11 @@ func run():
     var paused_owner = Node.new()
     root.add_child(paused_owner)
     paused_owner.process_mode = Node.PROCESS_MODE_DISABLED
+    var paused_results: Array = []
+    assert(scheduler.submit(paused_owner,func(): return 42,func(data): paused_results.append(data)))
+    while not scheduler._workers[0].get("joined",false): await process_frame
+    for frame in range(6): await process_frame
+    assert(paused_results.is_empty() and scheduler._workers.size()==1)
     var resumed = []
     _wait_for_owner(scheduler,paused_owner,resumed)
     for i in range(3): await process_frame
@@ -75,6 +80,8 @@ func run():
     paused_owner.process_mode = Node.PROCESS_MODE_INHERIT
     while resumed.is_empty(): await process_frame
     assert(resumed[0])
+    while paused_results.is_empty(): await process_frame
+    assert(paused_results == [42] and scheduler._workers.is_empty())
     paused_owner.queue_free()
     print("PASS worker terrain/water buffers, path geometry, town/road rules, decoration transforms, house meshes/collisions and paused-owner resumption")
     scheduler.queue_free()

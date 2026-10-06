@@ -33,7 +33,7 @@ func run():
             var other = SettlementSampler.new(terrain).sample_homestead(Vector2i(x,z))
             assert(other["position"] == home["position"])
             assert(other["recipe"].resolve() == home["recipe"].resolve())
-    assert(homes > 0 and homes < 60)
+    assert(homes > 60 and homes < 300)
     for z in range(-2,3):
         for x in range(-2,3):
             var town = sampler.sample_town(Vector2i(x,z))
@@ -49,7 +49,8 @@ func run():
                 previous.append(house)
                 styles[house["recipe"].layout] = true
                 var midpoint = (house["path_start"]+house["path_end"])*.5
-                assert(sampler.is_clearing(town["position"]+SettlementSampler.rotate(midpoint,town["yaw"])))
+                if not CityGeometry.is_city(town):
+                    assert(sampler.is_clearing(town["position"]+SettlementSampler.rotate(midpoint,town["yaw"])))
             assert(styles.size() >= 2)
     assert(not example.is_empty() and not town_example.is_empty())
     var roads = SettlementGeometry.new().build_furniture(sampler,town_example)
@@ -68,5 +69,5 @@ func run():
         assert(steep.sample_homestead(Vector2i(x,0)).is_empty())
         assert(steep.sample_town(Vector2i(x,0)).is_empty())
     terrain.free()
-    print("PASS: rare primitive homes, varied street-facing towns, seeded repeatability, non-overlapping lots, shared clearing/paths, village furniture, water and steep-slope rejection.")
+    print("PASS: frequent primitive homes, varied street-facing towns, seeded repeatability, non-overlapping lots, shared clearing/paths, village furniture, water and steep-slope rejection.")
     quit()

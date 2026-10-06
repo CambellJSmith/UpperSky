@@ -1,8 +1,8 @@
 extends TerrainHeightSampler # Reuses the complete deterministic geological terrain generator while replacing only its discontinuous local-water profile.
-class_name SeamlessTerrainHeightSampler # Supplies terrain heights shaped against the same continuous water elevation used by rendering and gameplay.
+class_name SeamlessTerrainHeightSampler # Retains smooth coastal terrain while water rendering and gameplay use horizontal surfaces.
 
 func _get_local_water_level(regional_height: float) -> float: # Replaces hard water-tier selection with the shared continuous geological water profile.
-    return TerrainWaterProfile.get_continuous_level(regional_height) # Keeps coast grading and underwater shaping synchronized with the seamless rendered water surface.
+    return TerrainWaterProfile.get_continuous_level(regional_height) # Preserves existing terrain and saved locations when changing the water surface.
 
 func sample_height(world_x: float, world_z: float) -> float:
     var point := Vector2(world_x, world_z)

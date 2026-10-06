@@ -50,12 +50,14 @@ var _current_chunk := INVALID_CHUNK
 var _last_local_origin := Vector2(INF, INF)
 var _refresh_elapsed := 0.0
 var _initialized := false
+var _path_dirty := {}
 
 func _ready() -> void:
     var terrain_node := get_node_or_null("../World/Terrain")
     var player_node := get_node_or_null("../DynamicEntities/Player")
     if terrain_node is InfiniteTerrain:
         _terrain = terrain_node
+        WorldPathNetwork.for_terrain(_terrain).chunk_routes_ready.connect(_on_paths_ready)
         _settlement_sampler = SettlementSampler.for_terrain(_terrain)
         _camp_sampler = CampSampler.new(_terrain)
     if player_node is Node3D:
@@ -468,7 +470,6 @@ func _queue_incremental(cell: Vector2i):
 func _build_incremental(cell: Vector2i, scheduler: GenerationScheduler):
     scheduler.active_owner = self
     scheduler.active_priority = 1 if maxi(absi(cell.x-_current_chunk.x),absi(cell.y-_current_chunk.y)) <= 1 else 2
-    await WorldPathNetwork.for_terrain(_terrain).routes_in_chunk_incremental(cell,scheduler)
     var origin_point = Vector2(cell)*TerrainConfiguration.CHUNK_SIZE
     var shrine_first = Vector2i(floori(origin_point.x/WayshrineSampler.CELL_SIZE),floori(origin_point.y/WayshrineSampler.CELL_SIZE))
     var end_point = origin_point+Vector2.ONE*TerrainConfiguration.CHUNK_SIZE
@@ -484,6 +485,10 @@ func _build_incremental(cell: Vector2i, scheduler: GenerationScheduler):
         await _sample_species_incremental(species,origin,transforms,colours,scheduler)
         batches.append([transforms,colours])
     _building.erase(cell)
+    if _path_dirty.has(cell):
+        _path_dirty.erase(cell)
+        if _desired_chunks.has(cell): _pending_chunks.append(cell)
+        return
     if not is_inside_tree() or not _desired_chunks.has(cell) or _chunks.has(cell): return
     if not await scheduler.checkpoint(self): return
     var chunk = Node3D.new()
@@ -494,3 +499,13 @@ func _build_incremental(cell: Vector2i, scheduler: GenerationScheduler):
         if not await scheduler.checkpoint(self): chunk.queue_free(); return
         _add_batch(chunk,species,batches[species][0],batches[species][1])
     _chunks[cell] = chunk
+
+func _on_paths_ready(cell: Vector2i):
+    for z in range(-1,2):
+        for x in range(-1,2):
+            var affected := cell+Vector2i(x,z)
+            if _building.has(affected): _path_dirty[affected] = true; continue
+            if not _chunks.has(affected): continue
+            _chunks[affected].queue_free()
+            _chunks.erase(affected)
+            if _desired_chunks.has(affected): _pending_chunks.append(affected)

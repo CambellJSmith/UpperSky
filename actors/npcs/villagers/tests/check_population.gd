@@ -12,7 +12,7 @@ func run():
     var home = settlements.find_nearby(Vector2.ZERO,"home")
     var residents = sampler.town(town)
     var homesteaders = sampler.home(home)
-    assert(residents.size() == 6,"Town street route was rejected")
+    assert(residents.size() == 8,"Town street route was rejected")
     assert(homesteaders.size() == 1,"Cottage yard route was rejected")
     var travellers = 0
     for z in range(-4,5):
@@ -21,7 +21,7 @@ func run():
             var second = sampler.travellers(Vector2i(x,z))
             assert(first == second)
             for definition in first:
-                assert(sampler.route_safe(definition.route))
+                assert(sampler.route_safe(definition.route,false))
                 travellers += 1
     assert(travellers > 0)
     var moving = 0

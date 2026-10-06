@@ -1,10 +1,10 @@
 extends RefCounted
 class_name SettlementSampler
 
-const HOMESTEAD_CELL_SIZE: float = 768.0
-const HOMESTEAD_CHANCE: float = .15
-const TOWN_CELL_SIZE: float = 3072.0
-const TOWN_CHANCE: float = .90
+const HOMESTEAD_CELL_SIZE: float = 384.0
+const HOMESTEAD_CHANCE: float = .55
+const TOWN_CELL_SIZE: float = 1536.0
+const TOWN_CHANCE: float = 1.0
 const MIN_TOWN_HOUSES: int = 8
 const CACHE_LIMIT: int = 256
 static var _shared: Dictionary = {}
@@ -54,7 +54,7 @@ func sample_homestead(cell: Vector2i) -> Dictionary:
         recipe.roof_style = HouseRecipe.RoofStyle.THATCH
         recipe.include_porch = rng.randf() < .3
         var yaw: float = rng.randf_range(0,TAU)
-        for attempt in range(12):
+        for attempt in range(24):
             var point = Vector2(cell)*HOMESTEAD_CELL_SIZE+Vector2(rng.randf_range(32,HOMESTEAD_CELL_SIZE-32),rng.randf_range(32,HOMESTEAD_CELL_SIZE-32))
             if _within_town(point,30.0):
                 continue
@@ -73,7 +73,7 @@ func sample_town(cell: Vector2i) -> Dictionary:
     rng.seed = hash("town:%d:%d:%d"%[TerrainHeightSampler.WORLD_SEED,cell.x,cell.y])
     var result: Dictionary = {}
     if rng.randf() < TOWN_CHANCE:
-        for attempt in range(24):
+        for attempt in range(48):
             var centre = Vector2(cell)*TOWN_CELL_SIZE+Vector2(rng.randf_range(180,TOWN_CELL_SIZE-180),rng.randf_range(180,TOWN_CELL_SIZE-180))
             var yaw: float = rng.randf_range(0,TAU)
             if not _town_ground(centre,yaw):
@@ -230,8 +230,16 @@ func is_clearing(point: Vector2, padding: float = 0.0) -> bool:
     if WorldPathNetwork.for_terrain(_terrain).get_local_mask(point,true,padding) > .05: return true
     var town_cell = Vector2i(floori(point.x/TOWN_CELL_SIZE),floori(point.y/TOWN_CELL_SIZE))
     var town = sample_town(town_cell)
+    if not town.is_empty() and CityGeometry.is_city(town):
+        if CityGeometry.exterior_reserved(rotate(point-town.position,-town.yaw),padding): return true
     if not town.is_empty() and point.distance_squared_to(town["position"]) < pow(town["radius"]+padding,2):
+        var local := rotate(point-town.position,-town.yaw)
+        if not CityGeometry.is_city(town):
+            for street in [Rect2(-4.5,-76,9,152),Rect2(-76,-4.5,152,9),Rect2(-8,-8,16,16)]:
+                if street.grow(padding).has_point(local): return true
         for house in town["houses"]:
+            if not CityGeometry.is_city(town) and _segment_distance(local,house.path_start,house.path_end) < 1.2+padding:
+                return true
             var relative = rotate(point-house["position"],-house["yaw"])
             if house["bounds"].grow(2.5+padding).has_point(relative):
                 return true
@@ -267,9 +275,9 @@ func _walkable_path(centre: Vector2, yaw: float, start: Vector2, end: Vector2) -
     return true
 
 func find_nearby(point: Vector2, kind: String) -> Dictionary:
-    var size: float = TOWN_CELL_SIZE if kind=="town" else HOMESTEAD_CELL_SIZE
+    var size: float = TOWN_CELL_SIZE if kind in ["town","city"] else HOMESTEAD_CELL_SIZE
     var centre = Vector2i(floori(point.x/size),floori(point.y/size))
-    var max_radius: int = 2 if kind=="town" else 6
+    var max_radius: int = 3 if kind=="city" else 2 if kind=="town" else 6
     for ring in range(max_radius+1):
         var best: Dictionary = {}
         var distance: float = INF
@@ -278,7 +286,8 @@ func find_nearby(point: Vector2, kind: String) -> Dictionary:
                 if maxi(absi(x),absi(z)) != ring:
                     continue
                 var cell = centre+Vector2i(x,z)
-                var definition = sample_town(cell) if kind=="town" else sample_homestead(cell)
+                var definition = sample_town(cell) if kind in ["town","city"] else sample_homestead(cell)
+                if kind=="city" and (definition.is_empty() or not CityGeometry.is_city(definition)): continue
                 if not definition.is_empty() and point.distance_squared_to(definition["position"]) < distance:
                     best = definition
                     distance = point.distance_squared_to(definition["position"])
@@ -406,7 +415,7 @@ func sample_town_incremental(cell: Vector2i, scheduler: GenerationScheduler) -> 
     rng.seed = hash("town:%d:%d:%d"%[TerrainHeightSampler.WORLD_SEED,cell.x,cell.y])
     var result: Dictionary = {}
     if rng.randf() < TOWN_CHANCE:
-        for attempt in range(24):
+        for attempt in range(48):
             if not await scheduler.checkpoint(): return {}
             var centre = Vector2(cell)*TOWN_CELL_SIZE+Vector2(rng.randf_range(180,TOWN_CELL_SIZE-180),rng.randf_range(180,TOWN_CELL_SIZE-180))
             var yaw: float = rng.randf_range(0,TAU)
@@ -440,7 +449,7 @@ func sample_homestead_incremental(cell: Vector2i, scheduler: GenerationScheduler
         recipe.roof_style = HouseRecipe.RoofStyle.THATCH
         recipe.include_porch = rng.randf() < .3
         var yaw: float = rng.randf_range(0,TAU)
-        for attempt in range(12):
+        for attempt in range(24):
             if not await scheduler.checkpoint(): return {}
             var point = Vector2(cell)*HOMESTEAD_CELL_SIZE+Vector2(rng.randf_range(32,HOMESTEAD_CELL_SIZE-32),rng.randf_range(32,HOMESTEAD_CELL_SIZE-32))
             if await _within_town_incremental(point,30.0, scheduler):

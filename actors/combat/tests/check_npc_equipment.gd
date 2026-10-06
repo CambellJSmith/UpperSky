@@ -18,6 +18,11 @@ func run():
     game.add_child(player)
     player.set_physics_process(false)
     for model in range(7):
+        # Each grip fixture needs a clear arena; previous death checks leave corpses.
+        for child in world.get_children():
+            if child.has_meta("loot_target"): child.queue_free()
+        await physics_frame
+        await physics_frame
         definition.model = model
         definition.seed = 8000+model
         var npc = Villager.new()
@@ -40,7 +45,8 @@ func run():
             npc.combat.cancel()
             npc._action_remaining = 0
             npc.combat._cooldown = 0
-            assert(npc.combat.tick(.01) and npc.combat.attacking)
+            var fighting = npc.combat.tick(.01)
+            assert(fighting and npc.combat.attacking,"Model %d weapon %s active %s target %s"%[model,weapon.item_id,fighting,npc.combat.target])
             var action = npc.get_weapon_attack_action()
             assert(action in ["weapon_slash","weapon_chop","weapon_stab"])
             assert(npc._animation.current_animation == "Quaternius/"+Villager.CLIPS[action])

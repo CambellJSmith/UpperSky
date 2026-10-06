@@ -10,11 +10,11 @@ func definitions(cell: Vector2i) -> Array[Dictionary]:
     var biome = BiomeProfile.region(cell)
     var result: Array[Dictionary] = []
     if biome.kind != BiomeProfile.Kind.VOLCANIC_ISLANDS: return result
-    for i in range(4):
+    for i in range(6):
         var seed_value = hash("demon:%s:%d"%[cell,i])
         var rng = RandomNumberGenerator.new()
         rng.seed = seed_value
-        var centre: Vector2 = biome.centre+Vector2.from_angle(float(i)*TAU/4+biome.phase)*rng.randf_range(180,340)
+        var centre: Vector2 = biome.centre+Vector2.from_angle(float(i)*TAU/6+biome.phase)*rng.randf_range(180,340)
         var route: Array[Vector2] = [centre,centre+Vector2.from_angle(rng.randf()*TAU)*8]
         var dry = true
         for step in range(9):
@@ -54,7 +54,7 @@ func _profile__process(delta: float):
             var region_cell = cell+Vector2i(x,z)
             if point.distance_to(BiomeProfile.region(region_cell).centre) > 850: continue
             for definition in definitions(region_cell):
-                if _actors.size() >= 8 or _actors.has(definition.seed): continue
+                if _actors.size() >= 12 or _actors.has(definition.seed): continue
                 if point.distance_to(definition.route[0]) > 420: continue
                 var npc = Villager.new()
                 npc.name = "Demon_%d"%definition.seed

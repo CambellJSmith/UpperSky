@@ -62,10 +62,10 @@ void vertex() {
 
     float radial_distance = length(map_uv - vec2(0.5));
     float radial_weight = 1.0 - smoothstep(0.445, 0.5, radial_distance);
-    float distance_weight = 1.0 - smoothstep(125.0, 145.0, distance(absolute_patch_root, player_world_position));
-    float effective_coverage = clamp(patch_terrain_sample.g * radial_weight * distance_weight, 0.0, 1.0);
+    float distance_weight = 1.0 - smoothstep(60.0, 95.0, distance(absolute_patch_root, player_world_position));
+    float effective_coverage = clamp(patch_terrain_sample.g * radial_weight, 0.0, 1.0);
     float density_threshold = mix(0.02, 0.98, density_random);
-    patch_visible = step(density_threshold, effective_coverage);
+    patch_visible = step(density_threshold, effective_coverage) * step(0.001, distance_weight);
     grass_colour = mix(dry_colour, lush_colour, clamp(effective_coverage * 0.72 + colour_random * 0.28, 0.0, 1.0));
 
     if (patch_visible < 0.5) {
@@ -82,10 +82,10 @@ void vertex() {
         float grounded_height = mix(root_height, projected_surface_height, base_grounding_weight);
 
         VERTEX.xz = rotated_vertex_offset;
-        VERTEX.y += grounded_height - root_embed_depth;
+        VERTEX.y = VERTEX.y * distance_weight + grounded_height - root_embed_depth;
 
         float tip_weight = clamp(UV.y, 0.0, 1.0);
-        float sway_weight = tip_weight * tip_weight;
+        float sway_weight = tip_weight * tip_weight * distance_weight;
         float local_wave = sin(TIME * wind_speed + blade_world_root.x * wind_scale + blade_world_root.y * wind_scale * 0.73);
         float broad_gust = sin(TIME * wind_speed * 0.29 + blade_world_root.x * gust_scale - blade_world_root.y * gust_scale * 0.63);
         VERTEX.x += (local_wave * 0.68 + broad_gust * 0.32) * wind_strength * sway_weight;

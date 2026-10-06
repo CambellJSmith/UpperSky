@@ -1,4 +1,4 @@
-extends RefCounted # Defines the shared continuous water-height profile used by terrain shaping, rendering, and gameplay queries.
+extends RefCounted # Defines the shared continuous water-height profile retained for smooth terrain shaping; water surfaces use flat geological bands.
 class_name TerrainWaterProfile # Exposes one deterministic conversion from regional terrain elevation to seamless water elevation.
 
 static func get_continuous_level(regional_height: float) -> float: # Converts broad regional elevation into a continuous tier-compatible water surface without vertical jumps.

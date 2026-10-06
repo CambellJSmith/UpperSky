@@ -1,7 +1,7 @@
 extends RefCounted
 class_name EquipmentHit
 
-var source: FirstPersonPlayer
+var source: Node3D
 var item_id: StringName = &""
 var category: EquipmentDefinition.Category = EquipmentDefinition.Category.TOOL
 var damage: float = 0.0

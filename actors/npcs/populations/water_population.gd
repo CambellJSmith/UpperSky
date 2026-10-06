@@ -73,7 +73,7 @@ func _profile__process(delta: float):
             var region_cell = cell+Vector2i(x,z)
             if point.distance_to((Vector2(region_cell)+Vector2(.5,.5))*CELL_SIZE) > 800: continue
             for definition in definitions(region_cell):
-                if _actors.size() >= 8 or _actors.has(definition.seed): continue
+                if _actors.size() >= 16 or _actors.has(definition.seed): continue
                 if point.distance_to(definition.route[0]) > 420: continue
                 var npc = Villager.new()
                 npc.name = "FishMan_%d"%definition.seed

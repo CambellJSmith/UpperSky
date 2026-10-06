@@ -42,13 +42,6 @@ func _profile__process(delta: float):
             _refreshing = true
             _run_refresh(point,GenerationScheduler.instance)
     if _building: return
-    if not _pending.is_empty():
-        var job = _pending.pop_front()
-        if GenerationScheduler.instance == null: _build(job)
-        else:
-            _building = true
-            _run_build(job,GenerationScheduler.instance)
-        return
     # A town builds at most one house per frame, rather than a sixteen-house spike.
     for town: Node3D in _towns.values():
         var definition: Dictionary = town.get_meta("definition")
@@ -59,6 +52,36 @@ func _profile__process(delta: float):
                 _building = true
                 _run_house(town,definition,next,GenerationScheduler.instance)
             return
+    if not _pending.is_empty():
+        var job = _pending.pop_front()
+        if GenerationScheduler.instance == null: _build(job)
+        else:
+            _building = true
+            _run_build(job,GenerationScheduler.instance)
+        return
+
+func _nearby_cells(point: Vector2, centre: Vector2i, size: float) -> Array[Vector2i]:
+    var result: Array[Vector2i] = []
+    var radius := ceili(LOAD_DISTANCE/size)
+    for z in range(-radius,radius+1):
+        for x in range(-radius,radius+1):
+            var cell := centre+Vector2i(x,z)
+            var bounds := Rect2(Vector2(cell)*size,Vector2.ONE*size)
+            if point.distance_to(point.clamp(bounds.position,bounds.end)) <= LOAD_DISTANCE:
+                result.append(cell)
+    result.sort_custom(func(a: Vector2i,b: Vector2i):
+        return point.distance_squared_to((Vector2(a)+Vector2.ONE*.5)*size) < point.distance_squared_to((Vector2(b)+Vector2.ONE*.5)*size))
+    return result
+
+func _nearby_sites(point: Vector2) -> Array[Dictionary]:
+    var result: Array[Dictionary] = []
+    for kind in ["home","town"]:
+        var size: float = SettlementSampler.HOMESTEAD_CELL_SIZE if kind=="home" else SettlementSampler.TOWN_CELL_SIZE
+        var centre := Vector2i((point/size).floor())
+        for cell in _nearby_cells(point,centre,size):
+            result.append({"kind":kind,"cell":cell,"distance":point.distance_squared_to((Vector2(cell)+Vector2.ONE*.5)*size)})
+    result.sort_custom(func(a: Dictionary,b: Dictionary): return a.distance < b.distance)
+    return result
 
 func _refresh(point: Vector2):
     _pending.clear()
@@ -73,21 +96,15 @@ func _refresh(point: Vector2):
                 collection.erase(cell)
             else:
                 _collision_state(root,distance < COLLISION_DISTANCE)
-    var home_centre = Vector2i(floori(point.x/SettlementSampler.HOMESTEAD_CELL_SIZE),floori(point.y/SettlementSampler.HOMESTEAD_CELL_SIZE))
-    var town_centre = Vector2i(floori(point.x/SettlementSampler.TOWN_CELL_SIZE),floori(point.y/SettlementSampler.TOWN_CELL_SIZE))
-    for kind in ["home","town"]:
-        var centre: Vector2i = home_centre if kind=="home" else town_centre
-        var radius: int = 3 if kind=="home" else 1
+    for site in _nearby_sites(point):
+        var kind: String = site.kind
+        var cell: Vector2i = site.cell
         var collection: Dictionary = _homes if kind=="home" else _towns
-        for z in range(-radius,radius+1):
-            for x in range(-radius,radius+1):
-                var cell = centre+Vector2i(x,z)
-                if collection.has(cell):
-                    continue
-                var definition: Dictionary = _sampler.sample_homestead(cell) if kind=="home" else _sampler.sample_town(cell)
-                if definition.is_empty() or point.distance_to(definition["position"]) > LOAD_DISTANCE:
-                    continue
-                _pending.append({"kind":kind,"cell":cell,"definition":definition,"distance":point.distance_squared_to(definition["position"])})
+        if collection.has(cell): continue
+        var definition: Dictionary = _sampler.sample_homestead(cell) if kind=="home" else _sampler.sample_town(cell)
+        if definition.is_empty() or point.distance_to(definition["position"]) > LOAD_DISTANCE:
+            continue
+        _pending.append({"kind":kind,"cell":cell,"definition":definition,"distance":point.distance_squared_to(definition["position"])})
     _pending.sort_custom(func(a: Dictionary,b: Dictionary): return a["distance"] < b["distance"])
 
 func _build(job: Dictionary):
@@ -114,12 +131,18 @@ func _profile__build(job: Dictionary):
         root.rotation.y = definition["yaw"]
         root.set_meta("definition",definition)
         root.set_meta("next_house",0)
-        root.add_child(SettlementGeometry.new().build_furniture(_sampler,definition))
+        if CityGeometry.is_city(definition):
+            root.add_child(CityGeometry.exterior(definition))
+            CityStaticBatch.build_sync(root)
+            root.set_meta("next_house",definition.houses.size())
+        else:
+            root.add_child(SettlementGeometry.new().build_furniture(_sampler,definition))
         _towns[job["cell"]] = root
     var world = Vector3(point.x,definition["height"],point.y)
     root.set_meta("world_position",world)
     root.position = _terrain.world_to_local_position(world)
     add_child(root)
+    WorldPathNetwork.for_terrain(_terrain).local_routes(definition)
     var chest = LootChest.new()
     chest.loot_key = "settlement:%s:%s"%[job.kind,job.cell]
     chest.seed_value = definition.seed
@@ -171,24 +194,16 @@ func _refresh_incremental(point: Vector2, scheduler: GenerationScheduler):
                 collection.erase(cell)
             else:
                 _collision_state(root,distance < COLLISION_DISTANCE)
-    var home_centre = Vector2i(floori(point.x/SettlementSampler.HOMESTEAD_CELL_SIZE),floori(point.y/SettlementSampler.HOMESTEAD_CELL_SIZE))
-    var town_centre = Vector2i(floori(point.x/SettlementSampler.TOWN_CELL_SIZE),floori(point.y/SettlementSampler.TOWN_CELL_SIZE))
-    for kind in ["home","town"]:
+    for site in _nearby_sites(point):
         if not await scheduler.checkpoint(): return
-        var centre: Vector2i = home_centre if kind=="home" else town_centre
-        var radius: int = 3 if kind=="home" else 1
+        var kind: String = site.kind
+        var cell: Vector2i = site.cell
         var collection: Dictionary = _homes if kind=="home" else _towns
-        for z in range(-radius,radius+1):
-            if not await scheduler.checkpoint(): return
-            for x in range(-radius,radius+1):
-                if not await scheduler.checkpoint(): return
-                var cell = centre+Vector2i(x,z)
-                if collection.has(cell):
-                    continue
-                var definition: Dictionary = await _sampler.sample_homestead_incremental(cell,scheduler) if kind=="home" else await _sampler.sample_town_incremental(cell,scheduler)
-                if definition.is_empty() or point.distance_to(definition["position"]) > LOAD_DISTANCE:
-                    continue
-                _pending.append({"kind":kind,"cell":cell,"definition":definition,"distance":point.distance_squared_to(definition["position"])})
+        if collection.has(cell): continue
+        var definition: Dictionary = await _sampler.sample_homestead_incremental(cell,scheduler) if kind=="home" else await _sampler.sample_town_incremental(cell,scheduler)
+        if definition.is_empty() or point.distance_to(definition["position"]) > LOAD_DISTANCE:
+            continue
+        _pending.append({"kind":kind,"cell":cell,"definition":definition,"distance":point.distance_squared_to(definition["position"])})
     _pending.sort_custom(func(a: Dictionary,b: Dictionary): return a["distance"] < b["distance"])
 
 func _run_refresh(point: Vector2, scheduler: GenerationScheduler):
@@ -213,12 +228,20 @@ func _build_incremental(job: Dictionary, scheduler: GenerationScheduler):
         root.rotation.y = definition["yaw"]
         root.set_meta("definition",definition)
         root.set_meta("next_house",0)
-        root.add_child(SettlementGeometry.new().build_furniture(_sampler,definition))
+        if CityGeometry.is_city(definition):
+            root.add_child(CityGeometry.exterior(definition))
+            if not await CityStaticBatch.build(root,get_tree(),scheduler,self):
+                root.free()
+                return
+            root.set_meta("next_house",definition.houses.size())
+        else:
+            root.add_child(SettlementGeometry.new().build_furniture(_sampler,definition))
         _towns[job["cell"]] = root
     var world = Vector3(point.x,definition["height"],point.y)
     root.set_meta("world_position",world)
     root.position = _terrain.world_to_local_position(world)
     add_child(root)
+    WorldPathNetwork.for_terrain(_terrain).local_routes(definition)
     var chest = LootChest.new()
     chest.loot_key = "settlement:%s:%s"%[job.kind,job.cell]
     chest.seed_value = definition.seed

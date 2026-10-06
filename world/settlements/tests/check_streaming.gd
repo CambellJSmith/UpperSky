@@ -11,12 +11,18 @@ func run():
     console._execute_command("town")
     assert(player.is_fly_mode_enabled())
     for i in range(110): await process_frame
-    assert(streamer._towns.size() > 0 and streamer._towns.size() <= 9)
-    assert(streamer._homes.size() <= 49)
+    assert(streamer._towns.size() > 0 and streamer._towns.size() <= 25)
+    assert(streamer._homes.size() <= 225)
     var checked = 0
     for town in streamer._towns.values():
         var definition: Dictionary = town.get_meta("definition")
         assert(town.get_meta("next_house") == definition["houses"].size())
+        if CityGeometry.is_city(definition):
+            var has_gate := false
+            for child in town.get_children():
+                if child.has_meta("city_gate"): has_gate = true
+            assert(has_gate)
+            continue
         for i in range(definition["houses"].size()):
             var house = town.get_node("House%02d"%i)
             var item: Dictionary = definition["houses"][i]

@@ -7,7 +7,7 @@ static func populate(dungeon: ProceduralDungeonWorld):
     var used: Dictionary = {}
     var count = 0
     for attempt in range(160):
-        if count >= 4: break
+        if count >= 6: break
         var cell = layout.get_floor_cell_at(rng.randi_range(0,layout.get_floor_cell_count()-1))
         if Vector2(cell-layout.door_a_cell).length() < 5 or Vector2(cell-layout.door_b_cell).length() < 5 or used.has(cell): continue
         var neighbour = cell+Vector2i(1,0)

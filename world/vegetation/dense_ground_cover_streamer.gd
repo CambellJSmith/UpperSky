@@ -47,507 +47,520 @@ var _tile_building = false
 var _map_building = false
 var _requested_centre = Vector2(INF,INF)
 var _initialized: bool = false
+var _mask_revision := 0
+var _applied_mask_revision := -1
 
 func _ready() -> void:
-    var terrain_node: Node = get_node_or_null("../World/Terrain")
-    var player_node: Node = get_node_or_null("../DynamicEntities/Player")
-    if terrain_node is InfiniteTerrain:
-        _terrain = terrain_node as InfiniteTerrain
-        _settlement_sampler = SettlementSampler.for_terrain(_terrain)
-        _camp_sampler = CampSampler.new(_terrain)
-    if player_node is Node3D:
-        _player = player_node as Node3D
+	var terrain_node: Node = get_node_or_null("../World/Terrain")
+	var player_node: Node = get_node_or_null("../DynamicEntities/Player")
+	if terrain_node is InfiniteTerrain:
+		_terrain = terrain_node as InfiniteTerrain
+		WorldPathNetwork.for_terrain(_terrain).chunk_routes_ready.connect(_on_paths_ready)
+		_settlement_sampler = SettlementSampler.for_terrain(_terrain)
+		_camp_sampler = CampSampler.new(_terrain)
+	if player_node is Node3D:
+		_player = player_node as Node3D
 
 func _process(delta: float) -> void:
-    # Timing scopes are inactive until a console recording begins.
-    if not RuntimeProfiler.recording:
-        _profile__process(delta)
-        return
-    var _profile_token = RuntimeProfiler.begin("grass.stream")
-    _profile__process(delta)
-    RuntimeProfiler.end(_profile_token)
+	# Timing scopes are inactive until a console recording begins.
+	if not RuntimeProfiler.recording:
+		_profile__process(delta)
+		return
+	var _profile_token = RuntimeProfiler.begin("grass.stream")
+	_profile__process(delta)
+	RuntimeProfiler.end(_profile_token)
 
 func _profile__process(delta: float) -> void:
-    if not _initialized:
-        _try_initialize()
-        return
-    if _terrain == null or _player == null:
-        return
-    _refresh_elapsed += delta
-    if _refresh_elapsed < REFRESH_INTERVAL:
-        return
-    _refresh_elapsed = 0.0
-    _reposition_after_origin_change()
-    _recenter_if_needed()
-    _update_density_lods()
+	if not _initialized:
+		_try_initialize()
+		return
+	if _terrain == null or _player == null:
+		return
+	_refresh_elapsed += delta
+	if _refresh_elapsed < REFRESH_INTERVAL:
+		return
+	_refresh_elapsed = 0.0
+	_reposition_after_origin_change()
+	_recenter_if_needed()
+	_update_density_lods()
 
 func _try_initialize() -> void:
-    if _tile_building: return
-    if _terrain == null or _player == null:
-        return
-    if _terrain.get_loaded_chunk_count() <= 0 or not _player.is_physics_processing():
-        return
-    _water_sampler = SeamlessTerrainWaterLevelSampler.new()
-    _coverage_noise = _create_noise(1031, 0.0048, 2, 0.48)
-    _terrain_image = Image.create_empty(TERRAIN_MAP_RESOLUTION, TERRAIN_MAP_RESOLUTION, false, Image.FORMAT_RGF)
-    _terrain_texture = ImageTexture.create_from_image(_terrain_image)
-    _material = ShaderMaterial.new()
-    _material.shader = GRASS_SHADER
-    _material.set_shader_parameter("terrain_map", _terrain_texture)
-    _material.set_shader_parameter("carpet_size", CARPET_SIZE)
-    _material.set_shader_parameter("patch_spacing", PATCH_SPACING)
-    _material.set_shader_parameter("terrain_vertex_spacing", TERRAIN_VERTEX_SPACING)
-    _material.set_shader_parameter("root_embed_depth", ROOT_EMBED_DEPTH)
-    if GenerationScheduler.instance != null:
-        _tile_building = true
-        _initialize_tiles_incremental(GenerationScheduler.instance)
-        return
-    _create_tiles()
-    _recenter_if_needed(true)
-    _initialized = true
+	if _tile_building: return
+	if _terrain == null or _player == null:
+		return
+	if _terrain.get_loaded_chunk_count() <= 0 or not _player.is_physics_processing():
+		return
+	_water_sampler = SeamlessTerrainWaterLevelSampler.new()
+	_coverage_noise = _create_noise(1031, 0.0048, 2, 0.48)
+	_terrain_image = Image.create_empty(TERRAIN_MAP_RESOLUTION, TERRAIN_MAP_RESOLUTION, false, Image.FORMAT_RGF)
+	_terrain_texture = ImageTexture.create_from_image(_terrain_image)
+	_material = ShaderMaterial.new()
+	_material.shader = GRASS_SHADER
+	_material.set_shader_parameter("terrain_map", _terrain_texture)
+	_material.set_shader_parameter("carpet_size", CARPET_SIZE)
+	_material.set_shader_parameter("patch_spacing", PATCH_SPACING)
+	_material.set_shader_parameter("terrain_vertex_spacing", TERRAIN_VERTEX_SPACING)
+	_material.set_shader_parameter("root_embed_depth", ROOT_EMBED_DEPTH)
+	if GenerationScheduler.instance != null:
+		_tile_building = true
+		_initialize_tiles_incremental(GenerationScheduler.instance)
+		return
+	_create_tiles()
+	_recenter_if_needed(true)
+	_initialized = true
 
 func _recenter_if_needed(force_refresh: bool = false) -> void:
-    var player_world_position: Vector3 = _terrain.local_to_world_position(_player.global_position)
-    var snapped_centre: Vector2 = Vector2(
-        roundf(player_world_position.x / RECENTER_STEP) * RECENTER_STEP,
-        roundf(player_world_position.z / RECENTER_STEP) * RECENTER_STEP
-    )
-    if not force_refresh and snapped_centre == _requested_centre: return
-    _requested_centre = snapped_centre
-    if GenerationScheduler.instance != null:
-        if not _map_building:
-            _map_building = true
-            _build_map_incremental(GenerationScheduler.instance)
-        return
-    _apply_carpet_origin(snapped_centre)
-    _refresh_terrain_map()
-    _reposition_tiles()
-    _update_density_lods()
+	var player_world_position: Vector3 = _terrain.local_to_world_position(_player.global_position)
+	var snapped_centre: Vector2 = Vector2(
+		roundf(player_world_position.x / RECENTER_STEP) * RECENTER_STEP,
+		roundf(player_world_position.z / RECENTER_STEP) * RECENTER_STEP
+	)
+	if not force_refresh and snapped_centre == _requested_centre and _applied_mask_revision == _mask_revision: return
+	_requested_centre = snapped_centre
+	if GenerationScheduler.instance != null:
+		if not _map_building:
+			_map_building = true
+			_build_map_incremental(GenerationScheduler.instance)
+		return
+	_apply_carpet_origin(snapped_centre)
+	_refresh_terrain_map()
+	_applied_mask_revision = _mask_revision
+	_reposition_tiles()
+	_update_density_lods()
 
 func _apply_carpet_origin(centre: Vector2):
-    _carpet_world_centre = centre
-    _carpet_world_origin = centre-Vector2(HALF_CARPET_SIZE,HALF_CARPET_SIZE)
-    _terrain_map_world_origin = _carpet_world_origin-Vector2(TERRAIN_MAP_BORDER,TERRAIN_MAP_BORDER)
-    _material.set_shader_parameter("carpet_world_origin",_carpet_world_origin)
-    _material.set_shader_parameter("terrain_map_world_origin",_terrain_map_world_origin)
+	_carpet_world_centre = centre
+	_carpet_world_origin = centre-Vector2(HALF_CARPET_SIZE,HALF_CARPET_SIZE)
+	_terrain_map_world_origin = _carpet_world_origin-Vector2(TERRAIN_MAP_BORDER,TERRAIN_MAP_BORDER)
+	_material.set_shader_parameter("carpet_world_origin",_carpet_world_origin)
+	_material.set_shader_parameter("terrain_map_world_origin",_terrain_map_world_origin)
 
 func _build_map_incremental(scheduler: GenerationScheduler):
-    scheduler.active_owner = self
-    scheduler.active_priority = 1
-    while is_inside_tree():
-        var centre = _requested_centre
-        var origin = centre-Vector2(HALF_CARPET_SIZE+TERRAIN_MAP_BORDER,HALF_CARPET_SIZE+TERRAIN_MAP_BORDER)
-        var result = await _generate_map_incremental(origin,scheduler)
-        if result.is_empty(): break
-        if centre != _requested_centre: continue
-        if not await scheduler.checkpoint(self): break
-        _apply_carpet_origin(centre)
-        _terrain_image = result.image
-        _terrain_texture.update(_terrain_image)
-        _update_tile_bounds(result.minimum,result.maximum)
-        _reposition_tiles()
-        _update_density_lods()
-        break
-    _map_building = false
+	scheduler.active_owner = self
+	scheduler.active_priority = 1
+	while is_inside_tree():
+		var centre = _requested_centre
+		var revision := _mask_revision
+		var origin = centre-Vector2(HALF_CARPET_SIZE+TERRAIN_MAP_BORDER,HALF_CARPET_SIZE+TERRAIN_MAP_BORDER)
+		var result = await _generate_map_incremental(origin,scheduler)
+		if result.is_empty(): break
+		if centre != _requested_centre or revision != _mask_revision: continue
+		if not await scheduler.checkpoint(self): break
+		_apply_carpet_origin(centre)
+		_terrain_image = result.image
+		_terrain_texture.update(_terrain_image)
+		_applied_mask_revision = revision
+		_update_tile_bounds(result.minimum,result.maximum)
+		_reposition_tiles()
+		_update_density_lods()
+		break
+	_map_building = false
+
+func _on_paths_ready(cell: Vector2i):
+	if not _requested_centre.is_finite(): return
+	var carpet := Rect2(_requested_centre-Vector2.ONE*(HALF_CARPET_SIZE+TERRAIN_MAP_BORDER),Vector2.ONE*(CARPET_SIZE+TERRAIN_MAP_BORDER*2))
+	var area := Rect2(Vector2(cell)*WorldPathNetwork.CHUNK_SIZE,Vector2.ONE*WorldPathNetwork.CHUNK_SIZE)
+	if carpet.intersects(area.grow(32)): _mask_revision += 1
 
 func _reposition_after_origin_change() -> void:
-    var local_world_origin: Vector3 = _terrain.world_to_local_position(Vector3.ZERO)
-    var signature: Vector2 = Vector2(local_world_origin.x, local_world_origin.z)
-    if signature.is_equal_approx(_last_local_world_origin):
-        return
-    _reposition_tiles()
+	var local_world_origin: Vector3 = _terrain.world_to_local_position(Vector3.ZERO)
+	var signature: Vector2 = Vector2(local_world_origin.x, local_world_origin.z)
+	if signature.is_equal_approx(_last_local_world_origin):
+		return
+	_reposition_tiles()
 
 func _reposition_tiles() -> void:
-    if _tiles.is_empty():
-        return
-    var local_origin: Vector3 = _terrain.world_to_local_position(Vector3(_carpet_world_origin.x, 0.0, _carpet_world_origin.y))
-    for tile_z: int in range(TILE_AXIS_COUNT):
-        for tile_x: int in range(TILE_AXIS_COUNT):
-            var tile_index: int = tile_z * TILE_AXIS_COUNT + tile_x
-            _tiles[tile_index].position = local_origin + Vector3(float(tile_x) * TILE_SIZE, 0.0, float(tile_z) * TILE_SIZE)
-    var local_world_origin: Vector3 = _terrain.world_to_local_position(Vector3.ZERO)
-    _last_local_world_origin = Vector2(local_world_origin.x, local_world_origin.z)
+	if _tiles.is_empty():
+		return
+	var local_origin: Vector3 = _terrain.world_to_local_position(Vector3(_carpet_world_origin.x, 0.0, _carpet_world_origin.y))
+	for tile_z: int in range(TILE_AXIS_COUNT):
+		for tile_x: int in range(TILE_AXIS_COUNT):
+			var tile_index: int = tile_z * TILE_AXIS_COUNT + tile_x
+			_tiles[tile_index].position = local_origin + Vector3(float(tile_x) * TILE_SIZE, 0.0, float(tile_z) * TILE_SIZE)
+	var local_world_origin: Vector3 = _terrain.world_to_local_position(Vector3.ZERO)
+	_last_local_world_origin = Vector2(local_world_origin.x, local_world_origin.z)
 
 func _create_tiles() -> void:
-    _lod_meshes = [_create_patch_mesh(56),_create_patch_mesh(28),_create_patch_mesh(7)]
-    var patch_mesh: ArrayMesh = _lod_meshes[0]
-    _tile_lods.clear()
-    # A shared shuffled order distributes each visible prefix across the tile.
-    var order: Array[int] = []
-    for i in range(TILE_GRID_SIZE*TILE_GRID_SIZE): order.append(i)
-    var rng = RandomNumberGenerator.new()
-    rng.seed = 9137
-    for i in range(order.size()-1,0,-1):
-        var j = rng.randi_range(0,i)
-        var swap = order[i]
-        order[i] = order[j]
-        order[j] = swap
-    _tiles.clear()
-    for tile_z: int in range(TILE_AXIS_COUNT):
-        for tile_x: int in range(TILE_AXIS_COUNT):
-            var multimesh: MultiMesh = MultiMesh.new()
-            multimesh.transform_format = MultiMesh.TRANSFORM_3D
-            multimesh.use_custom_data = true
-            multimesh.mesh = patch_mesh
-            multimesh.instance_count = TILE_GRID_SIZE * TILE_GRID_SIZE
-            var instance_index: int = 0
-            for local_z: int in range(TILE_GRID_SIZE):
-                for local_x: int in range(TILE_GRID_SIZE):
-                    var shuffled = order[instance_index]
-                    var sample_x = shuffled%TILE_GRID_SIZE
-                    var sample_z: int = floori(float(shuffled)/TILE_GRID_SIZE)
-                    var global_x: int = tile_x * TILE_GRID_SIZE + sample_x
-                    var global_z: int = tile_z * TILE_GRID_SIZE + sample_z
-                    var origin: Vector3 = Vector3((float(sample_x) + 0.5) * PATCH_SPACING, 0.0, (float(sample_z) + 0.5) * PATCH_SPACING)
-                    multimesh.set_instance_transform(instance_index, Transform3D(Basis.IDENTITY, origin))
-                    var sample_u: float = (float(global_x) + 0.5) / float(GRID_SIZE)
-                    var sample_v: float = (float(global_z) + 0.5) / float(GRID_SIZE)
-                    multimesh.set_instance_custom_data(instance_index, Color(sample_u, sample_v, 0.0, 0.0))
-                    instance_index += 1
-            multimesh.custom_aabb = AABB(Vector3(-3.0, -600.0, -3.0), Vector3(TILE_SIZE + 6.0, 6400.0, TILE_SIZE + 6.0))
-            var tile: MultiMeshInstance3D = MultiMeshInstance3D.new()
-            tile.name = "GrassTile_%d_%d" % [tile_x, tile_z]
-            tile.multimesh = multimesh
-            tile.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-            tile.extra_cull_margin = 3.0
-            add_child(tile)
-            _tiles.append(tile)
-            _tile_lods.append(-1)
+	_lod_meshes = [_create_patch_mesh(56),_create_patch_mesh(28),_create_patch_mesh(7)]
+	var patch_mesh: ArrayMesh = _lod_meshes[0]
+	_tile_lods.clear()
+	# A shared shuffled order distributes each visible prefix across the tile.
+	var order: Array[int] = []
+	for i in range(TILE_GRID_SIZE*TILE_GRID_SIZE): order.append(i)
+	var rng = RandomNumberGenerator.new()
+	rng.seed = 9137
+	for i in range(order.size()-1,0,-1):
+		var j = rng.randi_range(0,i)
+		var swap = order[i]
+		order[i] = order[j]
+		order[j] = swap
+	_tiles.clear()
+	for tile_z: int in range(TILE_AXIS_COUNT):
+		for tile_x: int in range(TILE_AXIS_COUNT):
+			var multimesh: MultiMesh = MultiMesh.new()
+			multimesh.transform_format = MultiMesh.TRANSFORM_3D
+			multimesh.use_custom_data = true
+			multimesh.mesh = patch_mesh
+			multimesh.instance_count = TILE_GRID_SIZE * TILE_GRID_SIZE
+			var instance_index: int = 0
+			for local_z: int in range(TILE_GRID_SIZE):
+				for local_x: int in range(TILE_GRID_SIZE):
+					var shuffled = order[instance_index]
+					var sample_x = shuffled%TILE_GRID_SIZE
+					var sample_z: int = floori(float(shuffled)/TILE_GRID_SIZE)
+					var global_x: int = tile_x * TILE_GRID_SIZE + sample_x
+					var global_z: int = tile_z * TILE_GRID_SIZE + sample_z
+					var origin: Vector3 = Vector3((float(sample_x) + 0.5) * PATCH_SPACING, 0.0, (float(sample_z) + 0.5) * PATCH_SPACING)
+					multimesh.set_instance_transform(instance_index, Transform3D(Basis.IDENTITY, origin))
+					var sample_u: float = (float(global_x) + 0.5) / float(GRID_SIZE)
+					var sample_v: float = (float(global_z) + 0.5) / float(GRID_SIZE)
+					multimesh.set_instance_custom_data(instance_index, Color(sample_u, sample_v, 0.0, 0.0))
+					instance_index += 1
+			multimesh.custom_aabb = AABB(Vector3(-3.0, -600.0, -3.0), Vector3(TILE_SIZE + 6.0, 6400.0, TILE_SIZE + 6.0))
+			var tile: MultiMeshInstance3D = MultiMeshInstance3D.new()
+			tile.name = "GrassTile_%d_%d" % [tile_x, tile_z]
+			tile.multimesh = multimesh
+			tile.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			tile.extra_cull_margin = 3.0
+			add_child(tile)
+			_tiles.append(tile)
+			_tile_lods.append(-1)
 
 func _update_density_lods() -> void:
-    # Timing scopes are inactive until a console recording begins.
-    if not RuntimeProfiler.recording:
-        _profile__update_density_lods()
-        return
-    var _profile_token = RuntimeProfiler.begin("grass.lod")
-    _profile__update_density_lods()
-    RuntimeProfiler.end(_profile_token)
+	# Timing scopes are inactive until a console recording begins.
+	if not RuntimeProfiler.recording:
+		_profile__update_density_lods()
+		return
+	var _profile_token = RuntimeProfiler.begin("grass.lod")
+	_profile__update_density_lods()
+	RuntimeProfiler.end(_profile_token)
 
 func _profile__update_density_lods() -> void:
-    var player_world = _terrain.local_to_world_position(_player.global_position)
-    var point = Vector2(player_world.x,player_world.z)
-    _material.set_shader_parameter("player_world_position",point)
-    for z in range(TILE_AXIS_COUNT):
-        for x in range(TILE_AXIS_COUNT):
-            var index = z*TILE_AXIS_COUNT+x
-            var bounds = Rect2(_carpet_world_origin+Vector2(x,z)*TILE_SIZE,Vector2.ONE*TILE_SIZE)
-            var closest = point.clamp(bounds.position,bounds.end)
-            var distance = point.distance_to(closest)
-            var lod = 0 if distance < 42 else (1 if distance < 85 else (2 if distance < 145 else 3))
-            # Hysteresis prevents oscillation when standing at a density boundary.
-            var previous = _tile_lods[index]
-            if previous >= 0 and previous != lod:
-                var boundary: float = [42.0,85.0,145.0][mini(previous,lod)]
-                if absf(distance-boundary) < 5: lod = previous
-            if previous == lod: continue
-            var tile = _tiles[index]
-            tile.visible = lod < 3
-            tile.multimesh.visible_instance_count = [100,50,25,0][lod]
-            if lod < 3: tile.multimesh.mesh = _lod_meshes[lod]
-            _tile_lods[index] = lod
+	var player_world = _terrain.local_to_world_position(_player.global_position)
+	var point = Vector2(player_world.x,player_world.z)
+	_material.set_shader_parameter("player_world_position",point)
+	var ground_material: ShaderMaterial = _terrain._mesh_builder._terrain_material
+	ground_material.set_shader_parameter("grass_player_position",point)
+	ground_material.set_shader_parameter("grass_world_origin",_terrain._world_origin_offset)
+	ground_material.set_shader_parameter("grass_map_origin",_terrain_map_world_origin)
+	ground_material.set_shader_parameter("grass_map",_terrain_texture)
+	ground_material.set_shader_parameter("grass_detail_enabled",_applied_mask_revision>=0)
+	for z in range(TILE_AXIS_COUNT):
+		for x in range(TILE_AXIS_COUNT):
+			var index = z*TILE_AXIS_COUNT+x
+			var bounds = Rect2(_carpet_world_origin+Vector2(x,z)*TILE_SIZE,Vector2.ONE*TILE_SIZE)
+			var closest = point.clamp(bounds.position,bounds.end)
+			var distance = point.distance_to(closest)
+			var lod = 0 if distance < 42 else (1 if distance < 65 else (2 if distance < 95 else 3))
+			# Hysteresis prevents oscillation when standing at a density boundary.
+			var previous = _tile_lods[index]
+			if previous >= 0 and previous != lod:
+				var boundary: float = [42.0,65.0,95.0][mini(previous,lod)]
+				if absf(distance-boundary) < 5: lod = previous
+			if previous == lod: continue
+			var tile = _tiles[index]
+			tile.visible = lod < 3
+			tile.multimesh.visible_instance_count = [100,50,25,0][lod]
+			if lod < 3: tile.multimesh.mesh = _lod_meshes[lod]
+			_tile_lods[index] = lod
 
 func _refresh_terrain_map() -> void:
-    # Timing scopes are inactive until a console recording begins.
-    if not RuntimeProfiler.recording:
-        _profile__refresh_terrain_map()
-        return
-    var _profile_token = RuntimeProfiler.begin("grass.terrain_map")
-    _profile__refresh_terrain_map()
-    RuntimeProfiler.end(_profile_token)
+	# Timing scopes are inactive until a console recording begins.
+	if not RuntimeProfiler.recording:
+		_profile__refresh_terrain_map()
+		return
+	var _profile_token = RuntimeProfiler.begin("grass.terrain_map")
+	_profile__refresh_terrain_map()
+	RuntimeProfiler.end(_profile_token)
 
 func _profile__refresh_terrain_map() -> void:
-    var sample_count: int = TERRAIN_MAP_RESOLUTION * TERRAIN_MAP_RESOLUTION
-    var heights: PackedFloat32Array = PackedFloat32Array()
-    var water_levels: PackedFloat32Array = PackedFloat32Array()
-    heights.resize(sample_count)
-    water_levels.resize(sample_count)
-    var water_cache: Dictionary[Vector2i, float] = {}
-    var minimum_height: float = INF
-    var maximum_height: float = -INF
+	var sample_count: int = TERRAIN_MAP_RESOLUTION * TERRAIN_MAP_RESOLUTION
+	var heights: PackedFloat32Array = PackedFloat32Array()
+	var water_levels: PackedFloat32Array = PackedFloat32Array()
+	heights.resize(sample_count)
+	water_levels.resize(sample_count)
+	var water_cache: Dictionary[Vector2i, float] = {}
+	var minimum_height: float = INF
+	var maximum_height: float = -INF
 
-    for sample_z: int in range(TERRAIN_MAP_RESOLUTION):
-        var world_z: float = _terrain_map_world_origin.y + float(sample_z) * TERRAIN_VERTEX_SPACING
-        for sample_x: int in range(TERRAIN_MAP_RESOLUTION):
-            var world_x: float = _terrain_map_world_origin.x + float(sample_x) * TERRAIN_VERTEX_SPACING
-            var index: int = sample_z * TERRAIN_MAP_RESOLUTION + sample_x
-            var position: Vector2 = Vector2(world_x, world_z)
-            var height: float = _terrain.get_height_at(position)
-            var water_level: float = _sample_water_level_cached(position, water_cache)
-            heights[index] = height
-            water_levels[index] = water_level
-            minimum_height = minf(minimum_height, height)
-            maximum_height = maxf(maximum_height, height)
+	for sample_z: int in range(TERRAIN_MAP_RESOLUTION):
+		var world_z: float = _terrain_map_world_origin.y + float(sample_z) * TERRAIN_VERTEX_SPACING
+		for sample_x: int in range(TERRAIN_MAP_RESOLUTION):
+			var world_x: float = _terrain_map_world_origin.x + float(sample_x) * TERRAIN_VERTEX_SPACING
+			var index: int = sample_z * TERRAIN_MAP_RESOLUTION + sample_x
+			var position: Vector2 = Vector2(world_x, world_z)
+			var height: float = _terrain.get_height_at(position)
+			var water_level: float = _sample_water_level_cached(position, water_cache)
+			heights[index] = height
+			water_levels[index] = water_level
+			minimum_height = minf(minimum_height, height)
+			maximum_height = maxf(maximum_height, height)
 
-    for sample_z: int in range(TERRAIN_MAP_RESOLUTION):
-        var previous_z: int = maxi(sample_z - 1, 0)
-        var next_z: int = mini(sample_z + 1, TERRAIN_MAP_RESOLUTION - 1)
-        for sample_x: int in range(TERRAIN_MAP_RESOLUTION):
-            var previous_x: int = maxi(sample_x - 1, 0)
-            var next_x: int = mini(sample_x + 1, TERRAIN_MAP_RESOLUTION - 1)
-            var index: int = sample_z * TERRAIN_MAP_RESOLUTION + sample_x
-            var left_height: float = heights[sample_z * TERRAIN_MAP_RESOLUTION + previous_x]
-            var right_height: float = heights[sample_z * TERRAIN_MAP_RESOLUTION + next_x]
-            var back_height: float = heights[previous_z * TERRAIN_MAP_RESOLUTION + sample_x]
-            var forward_height: float = heights[next_z * TERRAIN_MAP_RESOLUTION + sample_x]
-            var x_distance: float = maxf(float(next_x - previous_x) * TERRAIN_VERTEX_SPACING, TERRAIN_VERTEX_SPACING)
-            var z_distance: float = maxf(float(next_z - previous_z) * TERRAIN_VERTEX_SPACING, TERRAIN_VERTEX_SPACING)
-            var x_grade: float = absf(right_height - left_height) / x_distance
-            var z_grade: float = absf(forward_height - back_height) / z_distance
-            var terrain_grade: float = maxf(x_grade, z_grade)
-            var slope_weight: float = 1.0 - smoothstep(SLOPE_FADE_START, SLOPE_FADE_END, terrain_grade)
+	for sample_z: int in range(TERRAIN_MAP_RESOLUTION):
+		var previous_z: int = maxi(sample_z - 1, 0)
+		var next_z: int = mini(sample_z + 1, TERRAIN_MAP_RESOLUTION - 1)
+		for sample_x: int in range(TERRAIN_MAP_RESOLUTION):
+			var previous_x: int = maxi(sample_x - 1, 0)
+			var next_x: int = mini(sample_x + 1, TERRAIN_MAP_RESOLUTION - 1)
+			var index: int = sample_z * TERRAIN_MAP_RESOLUTION + sample_x
+			var left_height: float = heights[sample_z * TERRAIN_MAP_RESOLUTION + previous_x]
+			var right_height: float = heights[sample_z * TERRAIN_MAP_RESOLUTION + next_x]
+			var back_height: float = heights[previous_z * TERRAIN_MAP_RESOLUTION + sample_x]
+			var forward_height: float = heights[next_z * TERRAIN_MAP_RESOLUTION + sample_x]
+			var x_distance: float = maxf(float(next_x - previous_x) * TERRAIN_VERTEX_SPACING, TERRAIN_VERTEX_SPACING)
+			var z_distance: float = maxf(float(next_z - previous_z) * TERRAIN_VERTEX_SPACING, TERRAIN_VERTEX_SPACING)
+			var x_grade: float = absf(right_height - left_height) / x_distance
+			var z_grade: float = absf(forward_height - back_height) / z_distance
+			var terrain_grade: float = maxf(x_grade, z_grade)
+			var slope_weight: float = 1.0 - smoothstep(SLOPE_FADE_START, SLOPE_FADE_END, terrain_grade)
 
-            var height: float = heights[index]
-            var water_clearance: float = height - water_levels[index]
-            var shore_weight: float = smoothstep(WATER_SHORE_START, WATER_SHORE_FULL, water_clearance)
-            var altitude_weight: float = 1.0 - smoothstep(GRASS_ALTITUDE_FADE_START, GRASS_ALTITUDE_FADE_END, height)
-            var world_position: Vector2 = Vector2(
-                _terrain_map_world_origin.x + float(sample_x) * TERRAIN_VERTEX_SPACING,
-                _terrain_map_world_origin.y + float(sample_z) * TERRAIN_VERTEX_SPACING
-            )
-            var regional_density: float = lerpf(0.90, 1.0, _sample_noise(_coverage_noise, world_position))
-            var path_suppression: float = TerrainPathSampler.get_grass_suppression(world_position,_terrain)
-            var coverage: float = clampf(shore_weight * slope_weight * altitude_weight * regional_density * (1.0 - path_suppression), 0.0, 1.0)
-            coverage *= BiomeProfile.vegetation_weight(world_position)
-            if _camp_sampler.is_clearing(world_position) or _settlement_sampler.is_clearing(world_position,PATCH_SPREAD_RADIUS+TERRAIN_VERTEX_SPACING*.5) or WayshrineSampler.for_terrain(_terrain).is_clearing(world_position,PATCH_SPREAD_RADIUS):
-                coverage = 0.0
-            _terrain_image.set_pixel(sample_x, sample_z, Color(height, coverage, 0.0, 1.0))
+			var height: float = heights[index]
+			var water_clearance: float = height - water_levels[index]
+			var shore_weight: float = smoothstep(WATER_SHORE_START, WATER_SHORE_FULL, water_clearance)
+			var altitude_weight: float = 1.0 - smoothstep(GRASS_ALTITUDE_FADE_START, GRASS_ALTITUDE_FADE_END, height)
+			var world_position: Vector2 = Vector2(
+				_terrain_map_world_origin.x + float(sample_x) * TERRAIN_VERTEX_SPACING,
+				_terrain_map_world_origin.y + float(sample_z) * TERRAIN_VERTEX_SPACING
+			)
+			var regional_density: float = lerpf(0.90, 1.0, _sample_noise(_coverage_noise, world_position))
+			var path_suppression: float = TerrainPathSampler.get_grass_suppression(world_position,_terrain)
+			var coverage: float = clampf(shore_weight * slope_weight * altitude_weight * regional_density * (1.0 - path_suppression), 0.0, 1.0)
+			coverage *= BiomeProfile.vegetation_weight(world_position)
+			if _camp_sampler.is_clearing(world_position) or _settlement_sampler.is_clearing(world_position,PATCH_SPREAD_RADIUS+TERRAIN_VERTEX_SPACING*.5) or WayshrineSampler.for_terrain(_terrain).is_clearing(world_position,PATCH_SPREAD_RADIUS):
+				coverage = 0.0
+			_terrain_image.set_pixel(sample_x, sample_z, Color(height, coverage, 0.0, 1.0))
 
-    _terrain_texture.update(_terrain_image)
-    _update_tile_bounds(minimum_height, maximum_height)
+	_terrain_texture.update(_terrain_image)
+	_update_tile_bounds(minimum_height, maximum_height)
 
 func _update_tile_bounds(_minimum_height: float, _maximum_height: float) -> void:
-    for index in range(_tiles.size()):
-        var tile = _tiles[index]
-        var x: int = index%TILE_AXIS_COUNT
-        var z: int = floori(float(index)/TILE_AXIS_COUNT)
-        var low: float = INF
-        var high: float = -INF
-        # Each tile gets its own height bounds so hills cannot keep an entire
-        # carpet visible. Include the map's border for blades reaching outside.
-        for row in range(z*4,mini(z*4+7,TERRAIN_MAP_RESOLUTION)):
-            for column in range(x*4,mini(x*4+7,TERRAIN_MAP_RESOLUTION)):
-                var height = _terrain_image.get_pixel(column,row).r
-                low = minf(low,height)
-                high = maxf(high,height)
-        tile.multimesh.custom_aabb = AABB(Vector3(-3,low-3,-3),Vector3(TILE_SIZE+6,maxf(high-low+8,16),TILE_SIZE+6))
+	for index in range(_tiles.size()):
+		var tile = _tiles[index]
+		var x: int = index%TILE_AXIS_COUNT
+		var z: int = floori(float(index)/TILE_AXIS_COUNT)
+		var low: float = INF
+		var high: float = -INF
+		# Each tile gets its own height bounds so hills cannot keep an entire
+		# carpet visible. Include the map's border for blades reaching outside.
+		for row in range(z*4,mini(z*4+7,TERRAIN_MAP_RESOLUTION)):
+			for column in range(x*4,mini(x*4+7,TERRAIN_MAP_RESOLUTION)):
+				var height = _terrain_image.get_pixel(column,row).r
+				low = minf(low,height)
+				high = maxf(high,height)
+		tile.multimesh.custom_aabb = AABB(Vector3(-3,low-3,-3),Vector3(TILE_SIZE+6,maxf(high-low+8,16),TILE_SIZE+6))
 
 func _sample_water_level_cached(position: Vector2, cache: Dictionary[Vector2i, float]) -> float:
-    var water_cell_size: float = TerrainConfiguration.CHUNK_SIZE / float(TerrainConfiguration.WATER_RESOLUTION - 1)
-    var water_cell: Vector2i = Vector2i(floori(position.x / water_cell_size), floori(position.y / water_cell_size))
-    if cache.has(water_cell):
-        return cache[water_cell]
-    var sample_x: float = (float(water_cell.x) + 0.5) * water_cell_size
-    var sample_z: float = (float(water_cell.y) + 0.5) * water_cell_size
-    var water_level: float = _water_sampler.sample_water_level(sample_x, sample_z)
-    cache[water_cell] = water_level
-    return water_level
+	var water_cell_size: float = TerrainConfiguration.CHUNK_SIZE / float(TerrainConfiguration.WATER_RESOLUTION - 1)
+	var water_cell: Vector2i = Vector2i(floori(position.x / water_cell_size), floori(position.y / water_cell_size))
+	if cache.has(water_cell):
+		return cache[water_cell]
+	var sample_x: float = (float(water_cell.x) + 0.5) * water_cell_size
+	var sample_z: float = (float(water_cell.y) + 0.5) * water_cell_size
+	var water_level: float = _water_sampler.sample_water_level(sample_x, sample_z)
+	cache[water_cell] = water_level
+	return water_level
 
 func _create_patch_mesh(blade_count: int = PATCH_BLADE_COUNT) -> ArrayMesh:
-    var vertices: PackedVector3Array = PackedVector3Array()
-    var normals: PackedVector3Array = PackedVector3Array()
-    var uvs: PackedVector2Array = PackedVector2Array()
-    var blade_roots: PackedVector2Array = PackedVector2Array()
-    var indices: PackedInt32Array = PackedInt32Array()
-    const GOLDEN_ANGLE: float = 2.39996323
+	var vertices: PackedVector3Array = PackedVector3Array()
+	var normals: PackedVector3Array = PackedVector3Array()
+	var uvs: PackedVector2Array = PackedVector2Array()
+	var blade_roots: PackedVector2Array = PackedVector2Array()
+	var indices: PackedInt32Array = PackedInt32Array()
+	const GOLDEN_ANGLE: float = 2.39996323
 
-    for ordinal: int in range(blade_count):
-        var blade: int = floori(float(ordinal)*PATCH_BLADE_COUNT/blade_count)
-        var radial_fraction: float = sqrt((float(blade) + 0.5) / float(PATCH_BLADE_COUNT))
-        var radial_angle: float = float(blade) * GOLDEN_ANGLE
-        var base: Vector3 = Vector3(cos(radial_angle), 0.0, sin(radial_angle)) * PATCH_SPREAD_RADIUS * radial_fraction
-        var facing_angle: float = radial_angle * 1.37 + sin(float(blade) * 5.17) * 0.72
-        var right: Vector3 = Vector3(cos(facing_angle), 0.0, sin(facing_angle))
-        var forward: Vector3 = Vector3(-sin(facing_angle), 0.0, cos(facing_angle))
-        var blade_height: float = lerpf(0.56, 1.08, float((blade * 37) % 19) / 18.0)
-        var blade_width: float = lerpf(0.075, 0.14, float((blade * 23) % 17) / 16.0)
-        var lean: float = lerpf(0.06, 0.18, float((blade * 29) % 13) / 12.0)
-        var start: int = vertices.size()
-        vertices.append_array(PackedVector3Array([
-            base - right * blade_width,
-            base + right * blade_width,
-            base + Vector3.UP * blade_height * 0.58 + forward * lean * 0.30 - right * blade_width * 0.58,
-            base + Vector3.UP * blade_height * 0.58 + forward * lean * 0.30 + right * blade_width * 0.58,
-            base + Vector3.UP * blade_height + forward * lean
-        ]))
-        for _unused: int in range(5):
-            normals.append(forward)
-            blade_roots.append(Vector2(base.x, base.z))
-        uvs.append_array(PackedVector2Array([
-            Vector2(0.0, 0.0),
-            Vector2(1.0, 0.0),
-            Vector2(0.18, 0.58),
-            Vector2(0.82, 0.58),
-            Vector2(0.5, 1.0)
-        ]))
-        indices.append_array(PackedInt32Array([
-            start,
-            start + 1,
-            start + 2,
-            start + 1,
-            start + 3,
-            start + 2,
-            start + 2,
-            start + 3,
-            start + 4
-        ]))
+	for ordinal: int in range(blade_count):
+		var blade: int = floori(float(ordinal)*PATCH_BLADE_COUNT/blade_count)
+		var radial_fraction: float = sqrt((float(blade) + 0.5) / float(PATCH_BLADE_COUNT))
+		var radial_angle: float = float(blade) * GOLDEN_ANGLE
+		var base: Vector3 = Vector3(cos(radial_angle), 0.0, sin(radial_angle)) * PATCH_SPREAD_RADIUS * radial_fraction
+		var facing_angle: float = radial_angle * 1.37 + sin(float(blade) * 5.17) * 0.72
+		var right: Vector3 = Vector3(cos(facing_angle), 0.0, sin(facing_angle))
+		var forward: Vector3 = Vector3(-sin(facing_angle), 0.0, cos(facing_angle))
+		var blade_height: float = lerpf(0.56, 1.08, float((blade * 37) % 19) / 18.0)
+		var blade_width: float = lerpf(0.075, 0.14, float((blade * 23) % 17) / 16.0)
+		var lean: float = lerpf(0.06, 0.18, float((blade * 29) % 13) / 12.0)
+		var start: int = vertices.size()
+		vertices.append_array(PackedVector3Array([
+			base - right * blade_width,
+			base + right * blade_width,
+			base + Vector3.UP * blade_height * 0.58 + forward * lean * 0.30 - right * blade_width * 0.58,
+			base + Vector3.UP * blade_height * 0.58 + forward * lean * 0.30 + right * blade_width * 0.58,
+			base + Vector3.UP * blade_height + forward * lean
+		]))
+		for _unused: int in range(5):
+			normals.append(forward)
+			blade_roots.append(Vector2(base.x, base.z))
+		uvs.append_array(PackedVector2Array([
+			Vector2(0.0, 0.0),
+			Vector2(1.0, 0.0),
+			Vector2(0.18, 0.58),
+			Vector2(0.82, 0.58),
+			Vector2(0.5, 1.0)
+		]))
+		indices.append_array(PackedInt32Array([
+			start,
+			start + 1,
+			start + 2,
+			start + 1,
+			start + 3,
+			start + 2,
+			start + 2,
+			start + 3,
+			start + 4
+		]))
 
-    var arrays: Array = []
-    arrays.resize(Mesh.ARRAY_MAX)
-    arrays[Mesh.ARRAY_VERTEX] = vertices
-    arrays[Mesh.ARRAY_NORMAL] = normals
-    arrays[Mesh.ARRAY_TEX_UV] = uvs
-    arrays[Mesh.ARRAY_TEX_UV2] = blade_roots
-    arrays[Mesh.ARRAY_INDEX] = indices
-    var mesh: ArrayMesh = ArrayMesh.new()
-    mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-    mesh.surface_set_material(0, _material)
-    return mesh
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_TEX_UV2] = blade_roots
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var mesh: ArrayMesh = ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	mesh.surface_set_material(0, _material)
+	return mesh
 
 func _sample_noise(noise: FastNoiseLite, position: Vector2) -> float:
-    return clampf((noise.get_noise_2d(position.x, position.y) + 1.0) * 0.5, 0.0, 1.0)
+	return clampf((noise.get_noise_2d(position.x, position.y) + 1.0) * 0.5, 0.0, 1.0)
 
 func _create_noise(seed_offset: int, frequency: float, octaves: int, gain: float) -> FastNoiseLite:
-    var noise: FastNoiseLite = FastNoiseLite.new()
-    noise.seed = TerrainHeightSampler.WORLD_SEED + seed_offset
-    noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
-    noise.frequency = frequency
-    noise.fractal_type = FastNoiseLite.FRACTAL_FBM
-    noise.fractal_octaves = octaves
-    noise.fractal_gain = gain
-    noise.fractal_lacunarity = 2.0
-    return noise
+	var noise: FastNoiseLite = FastNoiseLite.new()
+	noise.seed = TerrainHeightSampler.WORLD_SEED + seed_offset
+	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	noise.frequency = frequency
+	noise.fractal_type = FastNoiseLite.FRACTAL_FBM
+	noise.fractal_octaves = octaves
+	noise.fractal_gain = gain
+	noise.fractal_lacunarity = 2.0
+	return noise
 
 func _generate_map_incremental(origin: Vector2, scheduler: GenerationScheduler) -> Dictionary:
-    var first_cell = Vector2i(floori(origin.x/WorldPathNetwork.CHUNK_SIZE),floori(origin.y/WorldPathNetwork.CHUNK_SIZE))
-    var last_point = origin+Vector2.ONE*(TERRAIN_MAP_RESOLUTION-1)*TERRAIN_VERTEX_SPACING
-    var last_cell = Vector2i(floori(last_point.x/WorldPathNetwork.CHUNK_SIZE),floori(last_point.y/WorldPathNetwork.CHUNK_SIZE))
-    for z in range(first_cell.y,last_cell.y+1):
-        for x in range(first_cell.x,last_cell.x+1):
-            await WorldPathNetwork.for_terrain(_terrain).routes_in_chunk_incremental(Vector2i(x,z),scheduler)
-    var shrine_first = Vector2i(floori(origin.x/WayshrineSampler.CELL_SIZE),floori(origin.y/WayshrineSampler.CELL_SIZE))
-    var shrine_last = Vector2i(floori(last_point.x/WayshrineSampler.CELL_SIZE),floori(last_point.y/WayshrineSampler.CELL_SIZE))
-    for z in range(shrine_first.y,shrine_last.y+1):
-        for x in range(shrine_first.x,shrine_last.x+1):
-            await WayshrineSampler.for_terrain(_terrain).sample_cell_incremental(Vector2i(x,z),scheduler)
-    var image = Image.create_empty(TERRAIN_MAP_RESOLUTION,TERRAIN_MAP_RESOLUTION,false,Image.FORMAT_RGF)
-    var sample_count: int = TERRAIN_MAP_RESOLUTION * TERRAIN_MAP_RESOLUTION
-    var heights: PackedFloat32Array = PackedFloat32Array()
-    var water_levels: PackedFloat32Array = PackedFloat32Array()
-    heights.resize(sample_count)
-    water_levels.resize(sample_count)
-    var water_cache: Dictionary[Vector2i, float] = {}
-    var minimum_height: float = INF
-    var maximum_height: float = -INF
+	var last_point = origin+Vector2.ONE*(TERRAIN_MAP_RESOLUTION-1)*TERRAIN_VERTEX_SPACING
+	var shrine_first = Vector2i(floori(origin.x/WayshrineSampler.CELL_SIZE),floori(origin.y/WayshrineSampler.CELL_SIZE))
+	var shrine_last = Vector2i(floori(last_point.x/WayshrineSampler.CELL_SIZE),floori(last_point.y/WayshrineSampler.CELL_SIZE))
+	for z in range(shrine_first.y,shrine_last.y+1):
+		for x in range(shrine_first.x,shrine_last.x+1):
+			await WayshrineSampler.for_terrain(_terrain).sample_cell_incremental(Vector2i(x,z),scheduler)
+	var image = Image.create_empty(TERRAIN_MAP_RESOLUTION,TERRAIN_MAP_RESOLUTION,false,Image.FORMAT_RGF)
+	var sample_count: int = TERRAIN_MAP_RESOLUTION * TERRAIN_MAP_RESOLUTION
+	var heights: PackedFloat32Array = PackedFloat32Array()
+	var water_levels: PackedFloat32Array = PackedFloat32Array()
+	heights.resize(sample_count)
+	water_levels.resize(sample_count)
+	var water_cache: Dictionary[Vector2i, float] = {}
+	var minimum_height: float = INF
+	var maximum_height: float = -INF
 
-    for sample_z: int in range(TERRAIN_MAP_RESOLUTION):
-        if not await scheduler.checkpoint(): return {}
-        var world_z: float = origin.y + float(sample_z) * TERRAIN_VERTEX_SPACING
-        for sample_x: int in range(TERRAIN_MAP_RESOLUTION):
-            if not await scheduler.checkpoint(): return {}
-            var world_x: float = origin.x + float(sample_x) * TERRAIN_VERTEX_SPACING
-            var index: int = sample_z * TERRAIN_MAP_RESOLUTION + sample_x
-            var position: Vector2 = Vector2(world_x, world_z)
-            var height: float = _terrain.get_height_at(position)
-            var water_level: float = _sample_water_level_cached(position, water_cache)
-            heights[index] = height
-            water_levels[index] = water_level
-            minimum_height = minf(minimum_height, height)
-            maximum_height = maxf(maximum_height, height)
+	for sample_z: int in range(TERRAIN_MAP_RESOLUTION):
+		if not await scheduler.checkpoint(): return {}
+		var world_z: float = origin.y + float(sample_z) * TERRAIN_VERTEX_SPACING
+		for sample_x: int in range(TERRAIN_MAP_RESOLUTION):
+			if not await scheduler.checkpoint(): return {}
+			var world_x: float = origin.x + float(sample_x) * TERRAIN_VERTEX_SPACING
+			var index: int = sample_z * TERRAIN_MAP_RESOLUTION + sample_x
+			var position: Vector2 = Vector2(world_x, world_z)
+			var height: float = _terrain.get_height_at(position)
+			var water_level: float = _sample_water_level_cached(position, water_cache)
+			heights[index] = height
+			water_levels[index] = water_level
+			minimum_height = minf(minimum_height, height)
+			maximum_height = maxf(maximum_height, height)
 
-    for sample_z: int in range(TERRAIN_MAP_RESOLUTION):
-        if not await scheduler.checkpoint(): return {}
-        var previous_z: int = maxi(sample_z - 1, 0)
-        var next_z: int = mini(sample_z + 1, TERRAIN_MAP_RESOLUTION - 1)
-        for sample_x: int in range(TERRAIN_MAP_RESOLUTION):
-            if not await scheduler.checkpoint(): return {}
-            var previous_x: int = maxi(sample_x - 1, 0)
-            var next_x: int = mini(sample_x + 1, TERRAIN_MAP_RESOLUTION - 1)
-            var index: int = sample_z * TERRAIN_MAP_RESOLUTION + sample_x
-            var left_height: float = heights[sample_z * TERRAIN_MAP_RESOLUTION + previous_x]
-            var right_height: float = heights[sample_z * TERRAIN_MAP_RESOLUTION + next_x]
-            var back_height: float = heights[previous_z * TERRAIN_MAP_RESOLUTION + sample_x]
-            var forward_height: float = heights[next_z * TERRAIN_MAP_RESOLUTION + sample_x]
-            var x_distance: float = maxf(float(next_x - previous_x) * TERRAIN_VERTEX_SPACING, TERRAIN_VERTEX_SPACING)
-            var z_distance: float = maxf(float(next_z - previous_z) * TERRAIN_VERTEX_SPACING, TERRAIN_VERTEX_SPACING)
-            var x_grade: float = absf(right_height - left_height) / x_distance
-            var z_grade: float = absf(forward_height - back_height) / z_distance
-            var terrain_grade: float = maxf(x_grade, z_grade)
-            var slope_weight: float = 1.0 - smoothstep(SLOPE_FADE_START, SLOPE_FADE_END, terrain_grade)
+	for sample_z: int in range(TERRAIN_MAP_RESOLUTION):
+		if not await scheduler.checkpoint(): return {}
+		var previous_z: int = maxi(sample_z - 1, 0)
+		var next_z: int = mini(sample_z + 1, TERRAIN_MAP_RESOLUTION - 1)
+		for sample_x: int in range(TERRAIN_MAP_RESOLUTION):
+			if not await scheduler.checkpoint(): return {}
+			var previous_x: int = maxi(sample_x - 1, 0)
+			var next_x: int = mini(sample_x + 1, TERRAIN_MAP_RESOLUTION - 1)
+			var index: int = sample_z * TERRAIN_MAP_RESOLUTION + sample_x
+			var left_height: float = heights[sample_z * TERRAIN_MAP_RESOLUTION + previous_x]
+			var right_height: float = heights[sample_z * TERRAIN_MAP_RESOLUTION + next_x]
+			var back_height: float = heights[previous_z * TERRAIN_MAP_RESOLUTION + sample_x]
+			var forward_height: float = heights[next_z * TERRAIN_MAP_RESOLUTION + sample_x]
+			var x_distance: float = maxf(float(next_x - previous_x) * TERRAIN_VERTEX_SPACING, TERRAIN_VERTEX_SPACING)
+			var z_distance: float = maxf(float(next_z - previous_z) * TERRAIN_VERTEX_SPACING, TERRAIN_VERTEX_SPACING)
+			var x_grade: float = absf(right_height - left_height) / x_distance
+			var z_grade: float = absf(forward_height - back_height) / z_distance
+			var terrain_grade: float = maxf(x_grade, z_grade)
+			var slope_weight: float = 1.0 - smoothstep(SLOPE_FADE_START, SLOPE_FADE_END, terrain_grade)
 
-            var height: float = heights[index]
-            var water_clearance: float = height - water_levels[index]
-            var shore_weight: float = smoothstep(WATER_SHORE_START, WATER_SHORE_FULL, water_clearance)
-            var altitude_weight: float = 1.0 - smoothstep(GRASS_ALTITUDE_FADE_START, GRASS_ALTITUDE_FADE_END, height)
-            var world_position: Vector2 = Vector2(
-                origin.x + float(sample_x) * TERRAIN_VERTEX_SPACING,
-                origin.y + float(sample_z) * TERRAIN_VERTEX_SPACING
-            )
-            var regional_density: float = lerpf(0.90, 1.0, _sample_noise(_coverage_noise, world_position))
-            var path_suppression: float = TerrainPathSampler.get_grass_suppression(world_position,_terrain)
-            var coverage: float = clampf(shore_weight * slope_weight * altitude_weight * regional_density * (1.0 - path_suppression), 0.0, 1.0)
-            coverage *= BiomeProfile.vegetation_weight(world_position)
-            if _camp_sampler.is_clearing(world_position) or _settlement_sampler.is_clearing(world_position,PATCH_SPREAD_RADIUS+TERRAIN_VERTEX_SPACING*.5) or WayshrineSampler.for_terrain(_terrain).is_clearing(world_position,PATCH_SPREAD_RADIUS):
-                coverage = 0.0
-            image.set_pixel(sample_x, sample_z, Color(height, coverage, 0.0, 1.0))
+			var height: float = heights[index]
+			var water_clearance: float = height - water_levels[index]
+			var shore_weight: float = smoothstep(WATER_SHORE_START, WATER_SHORE_FULL, water_clearance)
+			var altitude_weight: float = 1.0 - smoothstep(GRASS_ALTITUDE_FADE_START, GRASS_ALTITUDE_FADE_END, height)
+			var world_position: Vector2 = Vector2(
+				origin.x + float(sample_x) * TERRAIN_VERTEX_SPACING,
+				origin.y + float(sample_z) * TERRAIN_VERTEX_SPACING
+			)
+			var regional_density: float = lerpf(0.90, 1.0, _sample_noise(_coverage_noise, world_position))
+			var path_suppression: float = TerrainPathSampler.get_grass_suppression(world_position,_terrain)
+			var coverage: float = clampf(shore_weight * slope_weight * altitude_weight * regional_density * (1.0 - path_suppression), 0.0, 1.0)
+			coverage *= BiomeProfile.vegetation_weight(world_position)
+			if _camp_sampler.is_clearing(world_position) or _settlement_sampler.is_clearing(world_position,PATCH_SPREAD_RADIUS+TERRAIN_VERTEX_SPACING*.5) or WayshrineSampler.for_terrain(_terrain).is_clearing(world_position,PATCH_SPREAD_RADIUS):
+				coverage = 0.0
+			image.set_pixel(sample_x, sample_z, Color(height, coverage, 0.0, 1.0))
 
-    return {"image":image,"minimum":minimum_height,"maximum":maximum_height}
+	return {"image":image,"minimum":minimum_height,"maximum":maximum_height}
 
 func _create_tiles_incremental(scheduler: GenerationScheduler) -> void:
-    _lod_meshes = [_create_patch_mesh(56),_create_patch_mesh(28),_create_patch_mesh(7)]
-    var patch_mesh: ArrayMesh = _lod_meshes[0]
-    _tile_lods.clear()
-    # A shared shuffled order distributes each visible prefix across the tile.
-    var order: Array[int] = []
-    for i in range(TILE_GRID_SIZE*TILE_GRID_SIZE): order.append(i)
-    var rng = RandomNumberGenerator.new()
-    rng.seed = 9137
-    for i in range(order.size()-1,0,-1):
-        if not await scheduler.checkpoint(): return
-        var j = rng.randi_range(0,i)
-        var swap = order[i]
-        order[i] = order[j]
-        order[j] = swap
-    _tiles.clear()
-    for tile_z: int in range(TILE_AXIS_COUNT):
-        if not await scheduler.checkpoint(): return
-        for tile_x: int in range(TILE_AXIS_COUNT):
-            if not await scheduler.checkpoint(): return
-            var multimesh: MultiMesh = MultiMesh.new()
-            multimesh.transform_format = MultiMesh.TRANSFORM_3D
-            multimesh.use_custom_data = true
-            multimesh.mesh = patch_mesh
-            multimesh.instance_count = TILE_GRID_SIZE * TILE_GRID_SIZE
-            var instance_index: int = 0
-            for local_z: int in range(TILE_GRID_SIZE):
-                if not await scheduler.checkpoint(): return
-                for local_x: int in range(TILE_GRID_SIZE):
-                    if not await scheduler.checkpoint(): return
-                    var shuffled = order[instance_index]
-                    var sample_x = shuffled%TILE_GRID_SIZE
-                    var sample_z: int = floori(float(shuffled)/TILE_GRID_SIZE)
-                    var global_x: int = tile_x * TILE_GRID_SIZE + sample_x
-                    var global_z: int = tile_z * TILE_GRID_SIZE + sample_z
-                    var origin: Vector3 = Vector3((float(sample_x) + 0.5) * PATCH_SPACING, 0.0, (float(sample_z) + 0.5) * PATCH_SPACING)
-                    multimesh.set_instance_transform(instance_index, Transform3D(Basis.IDENTITY, origin))
-                    var sample_u: float = (float(global_x) + 0.5) / float(GRID_SIZE)
-                    var sample_v: float = (float(global_z) + 0.5) / float(GRID_SIZE)
-                    multimesh.set_instance_custom_data(instance_index, Color(sample_u, sample_v, 0.0, 0.0))
-                    instance_index += 1
-            multimesh.custom_aabb = AABB(Vector3(-3.0, -600.0, -3.0), Vector3(TILE_SIZE + 6.0, 6400.0, TILE_SIZE + 6.0))
-            var tile: MultiMeshInstance3D = MultiMeshInstance3D.new()
-            tile.name = "GrassTile_%d_%d" % [tile_x, tile_z]
-            tile.multimesh = multimesh
-            tile.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-            tile.extra_cull_margin = 3.0
-            add_child(tile)
-            _tiles.append(tile)
-            _tile_lods.append(-1)
+	_lod_meshes = [_create_patch_mesh(56),_create_patch_mesh(28),_create_patch_mesh(7)]
+	var patch_mesh: ArrayMesh = _lod_meshes[0]
+	_tile_lods.clear()
+	# A shared shuffled order distributes each visible prefix across the tile.
+	var order: Array[int] = []
+	for i in range(TILE_GRID_SIZE*TILE_GRID_SIZE): order.append(i)
+	var rng = RandomNumberGenerator.new()
+	rng.seed = 9137
+	for i in range(order.size()-1,0,-1):
+		if not await scheduler.checkpoint(): return
+		var j = rng.randi_range(0,i)
+		var swap = order[i]
+		order[i] = order[j]
+		order[j] = swap
+	_tiles.clear()
+	for tile_z: int in range(TILE_AXIS_COUNT):
+		if not await scheduler.checkpoint(): return
+		for tile_x: int in range(TILE_AXIS_COUNT):
+			if not await scheduler.checkpoint(): return
+			var multimesh: MultiMesh = MultiMesh.new()
+			multimesh.transform_format = MultiMesh.TRANSFORM_3D
+			multimesh.use_custom_data = true
+			multimesh.mesh = patch_mesh
+			multimesh.instance_count = TILE_GRID_SIZE * TILE_GRID_SIZE
+			var instance_index: int = 0
+			for local_z: int in range(TILE_GRID_SIZE):
+				if not await scheduler.checkpoint(): return
+				for local_x: int in range(TILE_GRID_SIZE):
+					if not await scheduler.checkpoint(): return
+					var shuffled = order[instance_index]
+					var sample_x = shuffled%TILE_GRID_SIZE
+					var sample_z: int = floori(float(shuffled)/TILE_GRID_SIZE)
+					var global_x: int = tile_x * TILE_GRID_SIZE + sample_x
+					var global_z: int = tile_z * TILE_GRID_SIZE + sample_z
+					var origin: Vector3 = Vector3((float(sample_x) + 0.5) * PATCH_SPACING, 0.0, (float(sample_z) + 0.5) * PATCH_SPACING)
+					multimesh.set_instance_transform(instance_index, Transform3D(Basis.IDENTITY, origin))
+					var sample_u: float = (float(global_x) + 0.5) / float(GRID_SIZE)
+					var sample_v: float = (float(global_z) + 0.5) / float(GRID_SIZE)
+					multimesh.set_instance_custom_data(instance_index, Color(sample_u, sample_v, 0.0, 0.0))
+					instance_index += 1
+			multimesh.custom_aabb = AABB(Vector3(-3.0, -600.0, -3.0), Vector3(TILE_SIZE + 6.0, 6400.0, TILE_SIZE + 6.0))
+			var tile: MultiMeshInstance3D = MultiMeshInstance3D.new()
+			tile.name = "GrassTile_%d_%d" % [tile_x, tile_z]
+			tile.multimesh = multimesh
+			tile.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			tile.extra_cull_margin = 3.0
+			add_child(tile)
+			_tiles.append(tile)
+			_tile_lods.append(-1)
 
 func _initialize_tiles_incremental(scheduler: GenerationScheduler):
-    scheduler.active_owner = self
-    scheduler.active_priority = 1
-    await _create_tiles_incremental(scheduler)
-    if not is_inside_tree() or not await scheduler.checkpoint(self): return
-    _recenter_if_needed(true)
-    _initialized = true
-    _tile_building = false
+	scheduler.active_owner = self
+	scheduler.active_priority = 1
+	await _create_tiles_incremental(scheduler)
+	if not is_inside_tree() or not await scheduler.checkpoint(self): return
+	_recenter_if_needed(true)
+	_initialized = true
+	_tile_building = false

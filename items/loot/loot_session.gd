@@ -3,7 +3,9 @@ class_name LootSession
 # Retain changed contents and deaths across streaming; SaveSystem persists these records.
 static var records: Dictionary = {}
 static func get_record(key: String, seed_value: int, person: bool = false) -> Dictionary:
-    if records.has(key): return records[key]
+    if records.has(key):
+        if person: records[key]["npc_id"] = key
+        return records[key]
     var inventory = LootStorage.new()
     var rng = RandomNumberGenerator.new()
     rng.seed = seed_value
@@ -15,6 +17,7 @@ static func get_record(key: String, seed_value: int, person: bool = false) -> Di
         var equipment: EquipmentDefinition = EquipmentCatalog.DEFINITIONS[rng.randi_range(0,EquipmentCatalog.DEFINITIONS.size()-1)]
         inventory.try_add_item(equipment.item_id,equipment.display_name,equipment.unit_weight,1,InventoryCategory.Type.WEAPONS_TOOLS)
     var record = {"inventory":inventory,"health":HealthState.new()}
+    if person: record["npc_id"] = key
     records[key] = record
     return record
 

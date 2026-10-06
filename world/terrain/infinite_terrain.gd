@@ -185,7 +185,7 @@ func _prepare_background_chunk(cell: Vector2i, scheduler: GenerationScheduler):
         if not await scheduler.checkpoint(self):
             _building.erase(cell)
             return
-        routes[cell+offset] = (await network.routes_in_chunk_incremental(cell+offset,scheduler)).duplicate(true)
+        routes[cell+offset] = network.cached_routes_in_chunk(cell+offset).duplicate(true)
     while not scheduler.has_worker_room():
         await scheduler.frame_started
         if not is_inside_tree() or scheduler._closing: return

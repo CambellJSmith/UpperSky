@@ -165,7 +165,7 @@ func _execute_command(command: String) -> void: # Parses and executes one comple
                 _write_line("No available villager within 20 metres.")
             else:
                 _write_line("Nearby villager: "+action)
-        "town", "homestead":
+        "town", "city", "homestead":
             _execute_settlement_command(arguments)
         "houses":
             _execute_houses_command(arguments)
@@ -191,7 +191,7 @@ func _write_help() -> void: # Lists supported commands and syntax.
     _write_line("  infinite_stamina [on|off]     Toggle or set infinite stamina.") # Documents developer stamina protection.
     _write_line("  biome <ice|river|volcanic>    Fly to a nearby biome preview.")
     _write_line("  houses [seed|clear]          Preview six medieval house styles.")
-    _write_line("  town / homestead            Visit a nearby natural settlement.")
+    _write_line("  town / city / homestead     Visit a nearby natural settlement.")
     _write_line("  time                          Show world time and cycle speed.") # Documents clock inspection.
     _write_line("  time speed <multiplier>       Set cycle speed; 0 pauses, 1 is normal.") # Documents cycle-speed control.
     _write_line("  time set <hour>               Set time directly using 0-24 hours.") # Documents direct time changes.
@@ -389,9 +389,10 @@ func _execute_settlement_command(arguments: PackedStringArray) -> void:
     var world = get_node_or_null("../World") as Node3D
     var terrain = get_node_or_null("../World/Terrain") as InfiniteTerrain
     if arguments.size() != 1:
-        _write_line("Usage: town / homestead")
+        _write_line("Usage: town / city / homestead")
         return
-    if _player == null or world == null or terrain == null or not world.visible:
+    var cities: CityTravel = get_node_or_null("../CityTravel")
+    if _player == null or world == null or terrain == null or not world.visible or (cities != null and cities.active != null):
         _write_line("Settlement travel is available in the overworld.")
         return
     var position_world = terrain.local_to_world_position(_player.global_position)
@@ -400,13 +401,14 @@ func _execute_settlement_command(arguments: PackedStringArray) -> void:
     if definition.is_empty():
         _write_line("No suitable %s found in the nearby search area."%arguments[0].to_lower())
         return
-    var is_town: bool = arguments[0].to_lower() == "town"
-    var offset = SettlementSampler.rotate(Vector2(0,-100 if is_town else -22),definition["yaw"])
+    var is_town: bool = arguments[0].to_lower() in ["town","city"]
+    var is_city := CityGeometry.is_city(definition) if is_town else false
+    var offset = SettlementSampler.rotate(Vector2(0,100 if is_city else -100 if is_town else -22),definition["yaw"])
     var point: Vector2 = definition["position"]+offset
     var altitude: float = maxf(definition["height"]+(30 if is_town else 9),sampler.ground_height(point)+5)
     _player.set_fly_mode_enabled(true)
     _player.global_position = terrain.world_to_local_position(Vector3(point.x,altitude,point.y))
-    _player.rotation.y = definition["yaw"]+PI
+    _player.rotation.y = definition["yaw"] if is_city else definition["yaw"]+PI
     _player.get_node("Head").rotation.x = -.28
     _player.velocity = Vector3.ZERO
     _write_line("Visiting a natural %s. Fly mode enabled; allow the terrain and houses to load."%arguments[0].to_lower())

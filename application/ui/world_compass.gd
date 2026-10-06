@@ -31,6 +31,22 @@ func _process(delta: float) -> void:
 	_bar.queue_redraw()
 
 func _refresh_points() -> void:
+	var cities: CityTravel = get_node_or_null("../CityTravel")
+	if cities != null and cities.active != null:
+		var local := cities.active.to_local(_player.global_position)
+		var origin := Vector2(local.x,local.z)
+		_points.clear()
+		_points.append({"id":"city:castle","kind":"castle","icon":"♜","offset":Vector2(0,-66)-origin})
+		_points.append({"id":"city:gate","kind":"gate","icon":"▣","offset":Vector2(0,112)-origin})
+		_points.append({"id":"city:square","kind":"square","icon":"◇","offset":-origin})
+		for child in cities.active.get_children():
+			if child.has_meta("house_parameters"):
+				_points.append({"id":str(child.name),"kind":"home","icon":"⌂","offset":Vector2(child.position.x,child.position.z)-origin})
+		var homes := _points.slice(3)
+		homes.sort_custom(func(a: Dictionary,b: Dictionary): return a.offset.length_squared()<b.offset.length_squared())
+		_points.resize(3)
+		for house in homes.slice(0,4): _points.append(house)
+		return
 	var terrain: InfiniteTerrain = get_node("../World/Terrain")
 	var absolute := terrain.local_to_world_position(_player.global_position)
 	var origin := Vector2(absolute.x, absolute.z)
@@ -80,7 +96,8 @@ func _collect_cells(owner: Node, property_name: String, kind: String, icon: Stri
 		if not is_instance_valid(item): continue
 		var world: Vector3 = item.get_meta("world_position", Vector3.ZERO)
 		if world == Vector3.ZERO: continue
-		_append_point("%s:%s" % [kind, cell], kind, icon, world, origin, output)
+		var city: bool = kind == "town" and item.has_meta("definition") and CityGeometry.is_city(item.get_meta("definition"))
+		_append_point("%s:%s" % [kind, cell], "city" if city else kind, "♜" if city else icon, world, origin, output)
 
 func _append_point(id: String, kind: String, icon: String, world: Vector3, origin: Vector2, output: Array[Dictionary]) -> void:
 	var offset := Vector2(world.x, world.z) - origin

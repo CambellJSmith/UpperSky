@@ -27,6 +27,7 @@ var _pending_lod_index: int = 0 # Tracks the next LOD update without shifting th
 var _last_origin_local_position: Vector2 = Vector2(INF, INF) # Detects floating-origin changes so loaded decoration chunks remain aligned.
 var _state_refresh_elapsed: float = 0.0 # Accumulates time between inexpensive stream-state checks.
 var _initializing = false
+var _path_dirty := {}
 var _initialized: bool = false # Tracks whether the terrain-backed initial decoration neighbourhood has been created.
 
 func _ready() -> void: # Resolves game-scene dependencies while waiting for shoreline spawn initialization to finish.
@@ -41,6 +42,8 @@ func initialize(terrain: InfiniteTerrain, player: Node3D, spawn_world_position: 
     if _initialized: # Detects an accidental repeated initialization request.
         return # Preserves the existing deterministic streamed state.
     _terrain = terrain # Stores the exact world query and coordinate-conversion service.
+    var network := WorldPathNetwork.for_terrain(_terrain)
+    if not network.chunk_routes_ready.is_connected(_on_paths_ready): network.chunk_routes_ready.connect(_on_paths_ready)
     _player = player # Stores the subject that controls streaming distance and collision.
     _mesh_library = library if library != null else WorldDecorationMeshLibrary.new() # Builds every shared smooth LOD and collision resource once.
     _sampler = WorldDecorationSampler.new(_terrain) # Creates deterministic dense scatter fields using the established terrain world seed.
@@ -248,7 +251,6 @@ func _profile__apply_pending_lod_updates() -> void: # Applies only a few retaine
 func _build_incremental(cell: Vector2i, scheduler: GenerationScheduler):
     scheduler.active_owner = self
     scheduler.active_priority = 1 if _get_chunk_distance(cell) <= 1 else 2
-    await WorldPathNetwork.for_terrain(_terrain).routes_in_chunk_incremental(cell,scheduler)
     var origin_point = Vector2(cell)*TerrainConfiguration.CHUNK_SIZE
     var shrine_first = Vector2i(floori(origin_point.x/WayshrineSampler.CELL_SIZE),floori(origin_point.y/WayshrineSampler.CELL_SIZE))
     var end_point = origin_point+Vector2.ONE*TerrainConfiguration.CHUNK_SIZE
@@ -258,6 +260,10 @@ func _build_incremental(cell: Vector2i, scheduler: GenerationScheduler):
             await WayshrineSampler.for_terrain(_terrain).sample_cell_incremental(Vector2i(x,z),scheduler)
     var placements = await _sampler.sample_chunk_incremental(cell,_mesh_library.get_boulder_variant_count(),scheduler)
     _building.erase(cell)
+    if _path_dirty.has(cell):
+        _path_dirty.erase(cell)
+        if _desired_chunks.has(cell): _pending_chunks.append(cell)
+        return
     if not is_inside_tree() or not _desired_chunks.has(cell) or _chunks.has(cell): return
     if not await scheduler.checkpoint(self): return
     var chunk = WorldDecorationChunk.new()
@@ -268,6 +274,16 @@ func _build_incremental(cell: Vector2i, scheduler: GenerationScheduler):
     chunk.configure(placements,_mesh_library,_get_lod_level(distance))
     _chunks[cell] = chunk
     chunk.set_collision_active(distance <= COLLISION_RADIUS)
+
+func _on_paths_ready(cell: Vector2i):
+    for z in range(-1,2):
+        for x in range(-1,2):
+            var affected := cell+Vector2i(x,z)
+            if _building.has(affected): _path_dirty[affected] = true; continue
+            if not _chunks.has(affected): continue
+            _chunks[affected].queue_free()
+            _chunks.erase(affected)
+            if _desired_chunks.has(affected): _pending_chunks.append(affected)
 
 func _initialize_incremental(spawn: Vector2, scheduler: GenerationScheduler):
     scheduler.active_owner = self

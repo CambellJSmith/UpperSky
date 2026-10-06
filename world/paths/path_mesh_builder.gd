@@ -13,26 +13,30 @@ func _init(terrain: InfiniteTerrain):
     _material.roughness = .94
     _material.metallic_specular = .12
 
-func build(cell: Vector2i) -> ArrayMesh:
+func build(cell: Vector2i, cached_only: bool = false) -> ArrayMesh:
     # Timing scopes are inactive until a console recording begins.
     if not RuntimeProfiler.recording:
-        return _profile_build(cell)
+        return _profile_build(cell,cached_only)
     var _profile_token = RuntimeProfiler.begin("paths.mesh")
-    var _profile_result = _profile_build(cell)
+    var _profile_result = _profile_build(cell,cached_only)
     RuntimeProfiler.end(_profile_token)
     return _profile_result
 
-func _profile_build(cell: Vector2i) -> ArrayMesh:
+func _profile_build(cell: Vector2i, cached_only: bool = false) -> ArrayMesh:
     var origin = Vector2(cell)*WorldPathNetwork.CHUNK_SIZE
     var bounds = Rect2(origin,Vector2.ONE*WorldPathNetwork.CHUNK_SIZE)
     var clip = PackedVector2Array([bounds.position,bounds.position+Vector2(bounds.size.x,0),bounds.end,bounds.position+Vector2(0,bounds.size.y)])
     var stream = SurfaceTool.new()
     stream.begin(Mesh.PRIMITIVE_TRIANGLES)
     var count = 0
-    for road in _network.routes_in_chunk(cell):
+    var roads := _network.cached_routes_in_chunk(cell) if cached_only else _network.routes_in_chunk(cell)
+    for road in roads:
+        if road.kind == "dock_deck": continue
         for i in range(road.points.size()-1):
             var a: Vector2 = road.points[i]
             var b: Vector2 = road.points[i+1]
+            if not road.bridges.is_empty(): continue
+            if not Rect2(a,Vector2.ZERO).expand(b).grow(road.edge).intersects(bounds): continue
             var steps = maxi(1,ceili(a.distance_to(b)/4.0))
             var normal = Vector2(-(b-a).y,(b-a).x).normalized()
             for step in range(steps):
@@ -52,9 +56,7 @@ func _profile_build(cell: Vector2i) -> ArrayMesh:
                                 if _terrain.has_water_at(point): dry = false; break
                                 var height = _network._settlements.ground_height(point)
                                 vertices.append(Vector3(point.x-origin.x,height+.035,point.y-origin.y))
-                                var mask = TerrainPathSampler.get_wear_mask(point,_terrain)
-                                var colour = WorldPathNetwork.EDGE_COLOUR.lerp(WorldPathNetwork.CORE_COLOUR,smoothstep(.48,.92,mask))
-                                colour.a = mask
+                                var colour := _road_colour(point,road)
                                 colours.append(colour)
                             if not dry: continue
                             var face = -(vertices[1]-vertices[0]).cross(vertices[2]-vertices[0])
@@ -95,7 +97,7 @@ func _ground_polygons(polygon: PackedVector2Array, chunk: PackedVector2Array) ->
                         if face.size() >= 3: result.append(face)
     return result
 
-func build_incremental(cell: Vector2i, scheduler: GenerationScheduler) -> ArrayMesh:
+func build_incremental(cell: Vector2i, scheduler: GenerationScheduler, cached_only: bool = false) -> ArrayMesh:
     var origin = Vector2(cell)*WorldPathNetwork.CHUNK_SIZE
     var bounds = Rect2(origin,Vector2.ONE*WorldPathNetwork.CHUNK_SIZE)
     var clip = PackedVector2Array([bounds.position,bounds.position+Vector2(bounds.size.x,0),bounds.end,bounds.position+Vector2(0,bounds.size.y)])
@@ -103,12 +105,15 @@ func build_incremental(cell: Vector2i, scheduler: GenerationScheduler) -> ArrayM
     stream.begin(Mesh.PRIMITIVE_TRIANGLES)
     var count = 0
     var sample_cache: Dictionary = {}
-    for road in await _network.routes_in_chunk_incremental(cell,scheduler):
+    var roads := _network.cached_routes_in_chunk(cell) if cached_only else await _network.routes_in_chunk_incremental(cell,scheduler)
+    for road in roads:
+        if road.kind == "dock_deck": continue
         if not await scheduler.checkpoint(): return null
         for i in range(road.points.size()-1):
             if not await scheduler.checkpoint(): return null
             var a: Vector2 = road.points[i]
             var b: Vector2 = road.points[i+1]
+            if not road.bridges.is_empty(): continue
             if not Rect2(a,Vector2.ZERO).expand(b).grow(road.edge).intersects(bounds): continue
             var steps = maxi(1,ceili(a.distance_to(b)/4.0))
             var normal = Vector2(-(b-a).y,(b-a).x).normalized()
@@ -132,14 +137,11 @@ func build_incremental(cell: Vector2i, scheduler: GenerationScheduler) -> ArrayM
                             for point: Vector2 in triangle:
                                 if not await scheduler.checkpoint(): return null
                                 if not sample_cache.has(point):
-                                    var mask = TerrainPathSampler.get_wear_mask(point,_terrain)
-                                    var colour = WorldPathNetwork.EDGE_COLOUR.lerp(WorldPathNetwork.CORE_COLOUR,smoothstep(.48,.92,mask))
-                                    colour.a = mask
-                                    sample_cache[point] = [_terrain.has_water_at(point),_network._settlements.ground_height(point),colour]
+                                    sample_cache[point] = [_terrain.has_water_at(point),_network._settlements.ground_height(point)]
                                 var sample = sample_cache[point]
                                 if sample[0]: dry = false; break
                                 vertices.append(Vector3(point.x-origin.x,sample[1]+.035,point.y-origin.y))
-                                colours.append(sample[2])
+                                colours.append(_road_colour(point,road))
                             if not dry: continue
                             var face = -(vertices[1]-vertices[0]).cross(vertices[2]-vertices[0])
                             if face.length_squared() < .00000001: continue
@@ -158,3 +160,11 @@ func build_incremental(cell: Vector2i, scheduler: GenerationScheduler) -> ArrayM
     mesh.surface_set_material(0,_material)
     mesh.resource_name = "SharedPaths_%d_%d"%[cell.x,cell.y]
     return mesh
+
+func _road_colour(point: Vector2, road: Dictionary) -> Color:
+    # A ready road supplies its own opacity even before the regional cache fills.
+    var distance := SettlementSampler._segment_distance(point,road.points[0],road.points[1])
+    var mask := 1.0-smoothstep(road.core,road.edge,distance)
+    var colour := WorldPathNetwork.EDGE_COLOUR.lerp(WorldPathNetwork.CORE_COLOUR,smoothstep(.48,.92,mask))
+    colour.a = mask
+    return colour

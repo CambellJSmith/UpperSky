@@ -18,7 +18,7 @@ func run():
     for npc in population.get_children():
         models[npc.model_index] = true
         assert(npc.route.size() >= 2)
-    assert(models.size() == 3)
+    assert(models.has(0) and models.has(1) and models.has(2) and models.has(9))
     var npc = population.get_child(0)
     player.global_position = npc.global_position+Vector3(0,2,3)
     assert(population.perform_nearby("punch"))

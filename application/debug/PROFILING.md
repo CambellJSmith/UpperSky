@@ -24,3 +24,5 @@ Memory limits: 60,000 frames, 1,800 half-second samples (roughly 15 minutes), 25
 Checks: `application/debug/tests/check_profiler.gd` and `application/debug/tests/check_profiler_console.gd` with `godot --headless --path . --script <path>`.
 
 World generation now runs through background terrain jobs and shared main-thread slices. Look for `generation.main_thread_slices`, `terrain.install_chunk` and the context `generation` counters. Worker task elapsed times overlap frames and should be analysed separately. The scheduler budget is a soft target; indivisible engine calls can exceed it.
+
+CPU scope stacks belong exclusively to the main thread. Shared procedural samplers also run on workers; their callback scopes return inactive tokens there, and worker durations remain in the scheduler generation counters. This prevents overlapping worker/main-thread calls from corrupting nesting or inflating main-thread CPU totals. Scope tokens are unique across recordings, so a callback finishing after stop/start cannot close a scope in the new recording. Strict nesting checks remain enabled within a capture.

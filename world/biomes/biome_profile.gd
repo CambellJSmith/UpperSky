@@ -95,10 +95,18 @@ static func height(point: Vector2, original: float) -> float:
 
 static func water_height(point: Vector2, original: float) -> float:
     var definition: Dictionary = region_at(point)
+    # Blend the land, never the water: each region/reach has a level surface.
+    if weight(point, definition) < 0.5:
+        return original
     var target: float = definition["sea"]
     if definition["kind"] == Kind.RIVER_VALLEY:
-        target = river_level(point.y - definition["centre"].y, target)
-    return lerpf(original, target, weight(point, definition))
+        var local_z: float = point.y - definition["centre"].y
+        # Grid-aligned waterfall gaps belong to the lower plunge pool.
+        if local_z < -320.0:
+            target += WATERFALL_DROP * 2.0
+        elif local_z < 320.0:
+            target += WATERFALL_DROP
+    return target
 
 static func polygon_radius(point: Vector2, sides: int) -> float:
     var sector: float = TAU / float(sides)

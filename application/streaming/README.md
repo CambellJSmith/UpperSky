@@ -1,8 +1,10 @@
 # World generation scheduling
 
-The production seamless terrain streamer computes ground and water buffers on two bounded `WorkerThreadPool` jobs. Jobs own their noise samplers and copied path definitions. They produce plain mesh arrays; mesh uploads, materials, nodes and physics shapes stay on the main thread. Biome cache access is protected by a mutex. The scheduler retains each generator until its task has finished and joins outstanding tasks during scene teardown.
+The production seamless terrain streamer computes ground and water buffers through two bounded `WorkerThreadPool` slots. Road and ferry searches may occupy at most one slot, reserving capacity for terrain. Jobs own their noise samplers and copied path definitions. They produce plain mesh arrays; mesh uploads, materials, nodes and physics shapes stay on the main thread. Biome cache access is protected by a mutex. The scheduler retains each generator until its task has finished, cancels cancellable samplers before joining them during scene teardown, and then releases the tasks.
 
-Runtime terrain preparation, paths, settlement placement/house geometry, trees/boulders, shrubs, grass maps, NPC route checks, camp placement and shrine placement cooperate through `GenerationScheduler.checkpoint`. The scheduler targets **3 ms of generation work per rendered frame**, including worker result installation. A checkpoint cannot interrupt an individual engine call or candidate check, so this is a soft budget rather than a hard maximum frame time. Nearby terrain preparation has highest priority; nearby paths/vegetation follow; distant work shares FIFO turns. Jobs inherit their priority and owning node through nested async helpers. Disabled world owners wait until resumed.
+Runtime terrain preparation, paths, settlement placement/house geometry, trees/boulders, shrubs, grass maps, NPC route checks, camp placement and shrine placement cooperate through `GenerationScheduler.checkpoint`. The scheduler targets **3 ms of generation work per rendered frame**, including worker result installation. A checkpoint cannot interrupt an individual engine call or candidate check, so this is a soft budget rather than a hard maximum frame time. Nearby terrain preparation starts with highest priority; waiting tickets gain urgency every 120 ms so continually renewed high-priority jobs cannot starve distant terrain or decorations. Disabled world owners wait until resumed.
+
+Terrain, trees, rocks, shrubs and grass never wait for regional road planning. Terrain workers snapshot only completed road masks, and vegetation starts with whatever masks are already available. Finishing a road chunk notifies nearby decoration/flora chunks to regenerate their clear corridors and refreshes the grass map. An update received during placement invalidates that unfinished result and queues a replacement. Thus a cold road cache cannot leave the initial terrain island surrounded by an empty, unchanging world.
 
 Terrain remains queued in rings from the player outward. Initial spawn and explicit teleport collision neighbourhoods are built synchronously before movement resumes. The starting cave and its physical return doors are ready before play begins; later entrance searches are incremental. Finished worker results are discarded when a chunk has left the desired stream set or was already created synchronously. Ordinary base-terrain use without the production seamless worker backend retains the synchronous API and duplicate/stale queue checks.
 
@@ -17,6 +19,10 @@ Profiler reports now include `generation.main_thread_slices`, `terrain.install_c
 Checks:
 
 - `godot --headless --path . --script application/streaming/tests/check_generation.gd`
+- `godot --headless --path . --script application/streaming/tests/check_scheduler_progress.gd`
+- `godot --headless --path . --script application/streaming/tests/check_world_streaming.gd` (use an isolated `XDG_DATA_HOME` for a cold-cache test)
 - `godot --headless --path . --script application/save/tests/check_save.gd`
 
 Validation included a 30-second headless full-world capture with no frames above 100 ms, plus a Compatibility renderer smoke test. Headless FPS is not comparable to a rendered gameplay capture. Use `profile start`, follow the same route as the original report, then `profile export` to measure the remaining bottlenecks on the player's graphics hardware.
+
+The continuity regression deliberately blocks the background search slot while checking fresh terrain, actual tree/boulder placements, shrubs/grass, and new chunks after a kilometre of movement. The scheduler regression checks that essential jobs still complete with a blocked search and that low-priority work progresses under a continuously renewed high-priority task.

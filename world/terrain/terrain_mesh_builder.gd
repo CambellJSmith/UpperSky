@@ -194,10 +194,10 @@ func _get_terrain_colour(height: float, normal: Vector3, water_level: float, wor
 
 func _wear_mask(point: Vector2) -> float:
     if _path_terrain != null: return TerrainPathSampler.get_wear_mask(point,_path_terrain)
-    var mask = TerrainPathSampler.get_wilderness_wear_mask(point)
+    var mask := 0.0
     var cell = Vector2i(floori(point.x/WorldPathNetwork.CHUNK_SIZE),floori(point.y/WorldPathNetwork.CHUNK_SIZE))
     for road in path_routes.get(cell,[]):
-        if road.kind == "regional" or not road.bounds.has_point(point): continue
+        if not road.bounds.has_point(point): continue
         for i in range(road.points.size()-1):
             var distance = SettlementSampler._segment_distance(point,road.points[i],road.points[i+1])
             mask = maxf(mask,1-smoothstep(road.core,road.edge,distance))

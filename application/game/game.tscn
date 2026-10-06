@@ -7,7 +7,6 @@
 [ext_resource type="Script" uid="uid://xtovjmrr8unn" path="res://application/effects/underwater_view.gd" id="5_underwater"]
 [ext_resource type="PackedScene" path="res://application/ui/player_status_hud.tscn" id="6_status_hud"]
 [ext_resource type="PackedScene" path="res://application/ui/player_inventory_ui.tscn" id="7_inventory_ui"]
-[ext_resource type="Script" path="res://application/ui/loot_ui.gd" id="36_loot_ui"]
 [ext_resource type="Script" uid="uid://dy85mo17u2opd" path="res://application/game/starting_inventory.gd" id="8_starting_inventory"]
 [ext_resource type="Script" uid="uid://dc7bghg4efp7k" path="res://world/decorations/world_decoration_streamer.gd" id="9_decorations"]
 [ext_resource type="Script" uid="uid://bm273wfofxgol" path="res://world/vegetation/ground_flora_streamer.gd" id="10_flora"]
@@ -27,8 +26,10 @@
 [ext_resource type="Script" uid="uid://c1m0qkb4yttic" path="res://actors/npcs/populations/volcano_population.gd" id="31_demons"]
 [ext_resource type="Script" uid="uid://bvljqt7kcqud2" path="res://actors/npcs/populations/water_population.gd" id="32_fish"]
 [ext_resource type="Script" uid="uid://dc0ua1fvc7kmr" path="res://application/ui/world_compass.gd" id="33_compass"]
-[ext_resource type="Script" path="res://application/ui/loading_screen.gd" id="34_loading"]
-[ext_resource type="Script" path="res://application/game/building_interiors.gd" id="35_interiors"]
+[ext_resource type="Script" uid="uid://cdyubh5n03yg5" path="res://application/ui/loading_screen.gd" id="34_loading"]
+[ext_resource type="Script" uid="uid://dt1gycfca81a3" path="res://application/game/building_interiors.gd" id="35_interiors"]
+[ext_resource type="Script" uid="uid://22p5wv0slwgs" path="res://application/ui/loot_ui.gd" id="36_loot_ui"]
+[ext_resource type="Script" uid="uid://do2o3rp8yspl2" path="res://actors/npcs/populations/night_ghost_population.gd" id="37_night_ghosts"]
 
 [node name="Game" type="Node3D" unique_id=1438919531]
 script = ExtResource("1_game")
@@ -49,6 +50,9 @@ script = ExtResource("31_demons")
 
 [node name="WaterPopulation" type="Node3D" parent="World" unique_id=1531347732]
 script = ExtResource("32_fish")
+
+[node name="NightGhostPopulation" type="Node3D" parent="World" unique_id=187892844]
+script = ExtResource("37_night_ghosts")
 
 [node name="Paths" type="Node3D" parent="World" unique_id=1452037469]
 script = ExtResource("22_paths")
@@ -83,15 +87,16 @@ script = ExtResource("5_underwater")
 [node name="WorldCompass" type="CanvasLayer" parent="." unique_id=170872532]
 script = ExtResource("33_compass")
 
-[node name="LoadingScreen" type="CanvasLayer" parent="."]
+[node name="LoadingScreen" type="CanvasLayer" parent="." unique_id=63058888]
 script = ExtResource("34_loading")
 
-[node name="Panel" type="ColorRect" parent="LoadingScreen"]
+[node name="Panel" type="ColorRect" parent="LoadingScreen" unique_id=1332616299]
 offset_right = 1280.0
 offset_bottom = 720.0
 color = Color(0.015, 0.02, 0.03, 1)
 
-[node name="Label" type="Label" parent="LoadingScreen/Panel"]
+[node name="Label" type="Label" parent="LoadingScreen/Panel" unique_id=82868463]
+layout_mode = 0
 offset_left = 480.0
 offset_top = 340.0
 offset_right = 800.0
@@ -99,12 +104,12 @@ offset_bottom = 380.0
 text = "Loading world…"
 horizontal_alignment = 1
 
-[node name="BuildingInteriors" type="Node3D" parent="."]
+[node name="BuildingInteriors" type="Node3D" parent="." unique_id=141661138]
 script = ExtResource("35_interiors")
 
 [node name="PlayerInventoryUi" parent="." unique_id=1144578426 instance=ExtResource("7_inventory_ui")]
 
-[node name="LootUI" type="CanvasLayer" parent="."]
+[node name="LootUI" type="CanvasLayer" parent="." unique_id=1994827058]
 script = ExtResource("36_loot_ui")
 
 [node name="DeveloperConsole" type="CanvasLayer" parent="." unique_id=938133770]

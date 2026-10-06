@@ -132,3 +132,6 @@ func _update_environment() -> void: # Blends sky, ambient light, and fog through
 func _blend_cycle_colour(night_colour: Color, day_colour: Color, twilight_colour: Color, day_weight: float, twilight_weight: float, twilight_strength: float) -> Color: # Resolves one colour across the complete cycle.
     var base_colour: Color = night_colour.lerp(day_colour, day_weight) # Establishes the broad night-to-day blend.
     return base_colour.lerp(twilight_colour, clampf(twilight_weight * twilight_strength, 0.0, 1.0)) # Adds temporary sunrise or sunset colour.
+
+static func is_night_hour(hour: float) -> bool:
+    return hour >= 18.0 or hour < 6.0

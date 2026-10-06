@@ -38,6 +38,7 @@ const MAXIMUM_PITCH: float = deg_to_rad(89.0)
 @onready var _camera: Camera3D = $Head/Camera3D
 
 var _terrain: InfiniteTerrain
+var water_transport: FerryCrossing
 var _gravity: float = 0.0
 var _pitch: float = 0.0
 var _gameplay_input_enabled: bool = true
@@ -133,6 +134,13 @@ func _profile__physics_process(delta: float) -> void:
     _stamina_exertion_this_frame = false
     if _gameplay_input_enabled:
         _apply_controller_look(delta)
+    if is_instance_valid(water_transport):
+        if not water_transport.is_visible_in_tree() or not water_transport.terrain.is_visible_in_tree():
+            water_transport.release(self,water_transport.side,false)
+        else:
+            velocity = Vector3.ZERO
+            _update_stamina_regeneration(delta)
+            return
     _update_water_state()
     _update_climbing_state()
 
