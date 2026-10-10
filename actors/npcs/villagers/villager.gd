@@ -479,7 +479,7 @@ func _walkable(point: Vector2) -> bool:
     if _dungeon != null:
         var cell = Vector2i(floori(point.x/DungeonGeometryBuilder.CELL_SIZE+_dungeon._layout.width*.5),floori(point.y/DungeonGeometryBuilder.CELL_SIZE+_dungeon._layout.height*.5))
         return _dungeon._layout.is_walkable(cell) and absf(_ground_height(point)-world_position.y) < .55
-    if (_terrain.has_water_at(point) and _route_sampler._paths.bridge_height(point) == null) or BiomeProfile.is_lava(point) or _route_sampler.is_obstructed(point, role in ["camper", "radiant_challenger"]): return false # Allow camp residents to walk within their clearing.
+    if (_terrain.has_water_at(point) and _route_sampler._paths.bridge_height(point) == null) or BiomeProfile.is_lava(point) or _route_sampler.is_obstructed(point, role in ["camper", "radiant_challenger"]): return false # Allow campers and radiant challengers to use reserved camp clearings.
     var height = _ground_height(point)
     return absf(height-world_position.y) < .55
 

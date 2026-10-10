@@ -77,7 +77,7 @@ func open_dialogue(npc: Villager) -> bool: # Open a conversation only during act
     _context = DialogueContext.build(npc, _terrain, _cycle) # Resolve factual substitutions once rather than per frame.
     _turns.clear() # Restart topic variation for the new exchange.
     _player.set_gameplay_input_enabled(false) # Give the conversation exclusive player input.
-    _menu.present((npc.get_relationship_species() + " " + npc.role.replace("_", " ")).capitalize(), _line("greeting")) # Present the actual speaker and contextual opening line.
+    _menu.present((npc.get_relationship_species() + " " + npc.role.trim_prefix("radiant_").replace("_", " ")).capitalize(), _line("greeting")) # Present the actual speaker and contextual opening line.
     _prompt.hide() # Remove the interaction hint immediately.
     return true # Confirm successful menu ownership.
 
@@ -145,6 +145,7 @@ func open_encounter(npc: Villager, kind: String) -> bool: # Start an unsolicited
     var definition: Dictionary = RadiantEventPhrases.definition(kind, hash(str(npc.get_social_record().get("npc_id", npc.name))) if is_instance_valid(npc) else 0) # Resolve supported authored content before taking input.
     if definition.is_empty() or not open_dialogue(npc): # Reuse ordinary reach, health, species and input ownership checks.
         return false # Leave the current gameplay or menu undisturbed.
+    definition["opening"] = str(definition.opening).format(_context) # Reuse ordinary dynamic world terms in radiant invitation phrases.
     _encounter_definition = definition # Retain the pending consent effect.
     _menu.present_encounter(definition) # Offer event-specific acceptance and refusal controls.
     return true # Confirm that the actor has started its radiant conversation.

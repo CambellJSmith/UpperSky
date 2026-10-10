@@ -17,6 +17,7 @@ var _age: float = 0.0 # Bound unsuccessful approach lifetime.
 var _attempts: int = 0 # Bound placement retries without scanning a large region.
 var _sequence: int = 0 # Keep event actor identities distinct within a game session.
 var _session_seed: int = 0 # Separate new radiant actors from saved ordinary populations.
+var _record_id: String = "" # Track the session-local social record for bounded retirement cleanup.
 var _departure: Vector2 # Remember the original safe ground position for peaceful retreat.
 
 func _ready() -> void: # Connect event completion and prepare session-local scheduling.
@@ -24,6 +25,7 @@ func _ready() -> void: # Connect event completion and prepare session-local sche
     _session_seed = _rng.randi() # Keep event loot identities distinct from older sessions.
     _sampler = RadiantSpawnSampler.new(_terrain) # Prepare reusable spawn validation resources.
     _dialogue.encounter_resolved.connect(_resolved) # Apply consent outcomes after the conversation releases player input.
+    _discard_retired_records.call_deferred() # Remove expired radiant records after the parent loads saved world state.
     _remaining = _rng.randf_range(60.0, 120.0) # Give fresh gameplay time before its first unsolicited encounter.
 
 func _process(delta: float) -> void: # Update event state at a bounded cadence.
@@ -46,7 +48,7 @@ func _process(delta: float) -> void: # Update event state at a bounded cadence.
     var world: Vector3 = _terrain.local_to_world_position(_player.global_position) # Resolve the current participant position after any origin shift.
     var destination: Vector2 = Vector2(world.x, world.z) # Keep pursuit steering in absolute coordinates.
     var distance: float = _player.global_position.distance_to(_actor.global_position) # Resolve current interaction and retirement reach.
-    if _actor.health.is_dead() or _state == State.FIGHTING: # Leave battle motion and corpse interactions to ordinary actor systems.
+    if _actor.health.is_dead() or _state == State.FIGHTING or _actor.is_in_combat(): # Leave battle motion and corpse interactions to ordinary actor systems.
         if distance > 80.0 and _offscreen(): # Retain nearby corpses for loot and avoid visible actor removal.
             _retire() # Release a departed event only after it is safely behind the camera.
         return # Do not overwrite combat targets or revive dead actors.
@@ -67,7 +69,7 @@ func _process(delta: float) -> void: # Update event state at a bounded cadence.
             return # Leave collision-backed movement to Villager physics.
     if _state == State.LEAVING: # Retreat after refusal, cancellation or an unsuccessful approach.
         _actor.set_encounter_destination(_departure) # Run back toward the originally validated spawn ground.
-        if distance > 40.0 and _offscreen(): # Require both separation and invisibility before removal.
+        if (distance > 24.0 or (_age > 120.0 and distance > 12.0)) and _offscreen(): # Let actors retire at their original rear spawn or after a distant blocked retreat.
             _retire() # Release the actor without popping it out of view.
 
 func _available() -> bool: # Centralize outdoor encounter readiness through public gameplay capabilities.
@@ -89,6 +91,7 @@ func _try_spawn() -> bool: # Attempt exactly one candidate before allocating or 
     _actor = Villager.new() # Reuse ordinary humanoid models, combat, collisions and loot.
     _actor.name = "Radiant Challenger %d" % _sequence # Identify event actors clearly in the scene tree.
     _actor.configure(_terrain, {"route": route, "seed": seed_value, "model": _rng.randi_range(0, 2), "role": "radiant_challenger", "start": 0}) # Select a male human, female human or orc challenger.
+    _record_id = str(_actor.get_social_record().get("npc_id", "")) # Retain only this active transient actor record.
     _actor.set_affection(AffectionState.NEUTRAL) # Keep every invitation peaceful until the player explicitly accepts.
     add_child(_actor) # Register the actor only after placement has passed all checks.
     _departure = point # Retain a checked retreat destination.
@@ -113,7 +116,15 @@ func _retire() -> void: # Release a safely departed radiant actor and restart th
     _reset() # Release ownership before scheduling a later event.
 
 func _reset() -> void: # Restore the single-event scheduler after completion or external actor removal.
+    if not _record_id.is_empty(): # Remove social state only after this unique event actor has departed.
+        LootSession.records.erase(_record_id) # Avoid accumulating records for actors that will never regenerate.
+    _record_id = "" # Release the retired transient identity.
     _actor = null # Drop the prior event actor reference.
     _state = State.IDLE # Reopen the event slot after its cooldown.
     _age = 0.0 # Clear the completed event lifetime.
     _remaining = _rng.randf_range(180.0, 300.0) # Space repeated unsolicited encounters during eligible gameplay.
+
+func _discard_retired_records() -> void: # Clear saved transient identities that are not reconstructed as active events.
+    for key: String in LootSession.records.keys(): # Inspect loaded social records once after scene initialization.
+        if key.begins_with("npc:radiant_challenger:") and key != _record_id: # Preserve an active event while identifying expired session-local challengers.
+            LootSession.records.erase(key) # Keep repeated play and save loads from retaining unreachable event records.
