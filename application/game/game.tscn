@@ -31,6 +31,8 @@
 [ext_resource type="Script" uid="uid://22p5wv0slwgs" path="res://application/ui/loot_ui.gd" id="36_loot_ui"]
 [ext_resource type="Script" uid="uid://do2o3rp8yspl2" path="res://actors/npcs/populations/night_ghost_population.gd" id="37_night_ghosts"]
 
+[ext_resource type="PackedScene" path="res://application/ui/dialogue/dialogue_interaction.tscn" id="38_dialogue"]
+
 [node name="Game" type="Node3D" unique_id=1438919531]
 script = ExtResource("1_game")
 
@@ -132,3 +134,5 @@ script = ExtResource("30_scheduler")
 
 [node name="SaveSystem" type="Node" parent="." unique_id=1481313246]
 script = ExtResource("29_save")
+
+[node name="Dialogue Interaction" parent="." instance=ExtResource("38_dialogue")]

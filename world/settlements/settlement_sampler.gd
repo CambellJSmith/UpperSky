@@ -461,3 +461,15 @@ func sample_homestead_incremental(cell: Vector2i, scheduler: GenerationScheduler
                 break
     _cache(_homesteads,cell,result)
     return result
+
+func known_nearby_city(point: Vector2) -> Dictionary: # Expose cached real city definitions without procedural generation during dialogue.
+    var best: Dictionary = {} # Represent missing geographical knowledge explicitly.
+    var distance_squared: float = 20000.0 * 20000.0 # Restrict local knowledge to the surrounding region.
+    for definition: Dictionary in _towns.values(): # Inspect only already generated settlement plans.
+        if definition.is_empty() or not CityGeometry.is_city(definition): # Exclude rejected sites and ordinary villages.
+            continue # Keep city references faithful to actual settlement types.
+        var candidate_distance: float = point.distance_squared_to(definition.position) # Compare absolute world positions.
+        if candidate_distance < distance_squared: # Retain the closest known city.
+            best = definition # Share the immutable procedural definition.
+            distance_squared = candidate_distance # Tighten the nearest-city comparison.
+    return best # Return no city when the NPC has no available local knowledge.
