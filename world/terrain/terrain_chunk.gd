@@ -25,7 +25,7 @@ func configure(source_mesh: ArrayMesh, water_mesh: ArrayMesh, faces: PackedVecto
     _collision_shape.name = "TerrainCollision" # Gives the runtime collision node a stable descriptive name.
     add_child(_collision_shape) # Adds the collision node beneath the static body without an active shape.
 
-func prepare_collision() -> void: # Build collision only when no reusable shape exists.
+func _prepare_collision() -> void: # Build collision only when no reusable shape exists.
     if _cached_collision != null: return # Avoid repeating exact terrain collision construction.
     if _collision_faces.is_empty(): # Retain compatibility with synchronous preview meshes.
         _cached_collision = _source_mesh.create_trimesh_shape() # Build once for mesh-only callers.
@@ -33,10 +33,13 @@ func prepare_collision() -> void: # Build collision only when no reusable shape 
         _cached_collision = ConcavePolygonShape3D.new() # Allocate a private physics resource on the main thread.
         _cached_collision.set_faces(_collision_faces) # Avoid mesh readback and repeated indexed triangle expansion.
 
+func is_collision_active() -> bool: # Expose physical state without allowing cache mutation.
+    return _collision_active # Let the streamer classify transitions through a read-only query.
+
 func set_collision_active(enabled: bool) -> void: # Toggle physics while retaining a reusable shape.
     if enabled == _collision_active: return # Avoid redundant physics changes.
     _collision_active = enabled # Record the required physical state.
-    if enabled: prepare_collision() # Build only when the bounded cache did not retain this collider.
+    if enabled: _prepare_collision() # Build only when the bounded cache did not retain this collider.
     _collision_shape.shape = _cached_collision if enabled else null # Detach distant physics without destroying cached geometry.
 
 func release_cached_collision() -> void: # Evict inactive collision when the terrain cache reaches capacity.

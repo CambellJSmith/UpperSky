@@ -302,7 +302,7 @@ func _update_collision_states() -> void: # Enables exact ground collision nearby
         _set_chunk_collision(chunk, _is_collision_coordinate(chunk_coordinate)) # Applies the collision state required by player distance.
 
 func _set_chunk_collision(chunk: TerrainChunk, enabled: bool) -> void: # Retain recently used distant shapes within a fixed memory bound.
-    var was_active: bool = chunk._collision_active # Identify actual transitions out of the physical neighbourhood.
+    var was_active: bool = chunk.is_collision_active() # Identify actual transitions out of the physical neighbourhood.
     chunk.set_collision_active(enabled) # Reattach cached geometry before considering a rebuild.
     if enabled: # Remove active shapes from the inactive eviction queue.
         _inactive_collisions.erase(chunk) # Keep active collision outside the inactive cache limit.
