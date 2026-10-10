@@ -34,6 +34,9 @@ func sample_water_level(world_x: float, world_z: float) -> float: # Returns one 
     var basin_mask: float = smoothstep(0.62, 0.90, 1.0 - basin_value) # Matches terrain's coherent lowland regions.
     var basin_cut: float = basin_mask * TerrainHeightSampler.BASIN_DEPTH # Reconstructs broad elevation reduction.
     var regional_height: float = tier_height + plateau_relief * TerrainConfiguration.WATER_REGIONAL_PLATEAU_INFLUENCE - basin_cut * TerrainConfiguration.WATER_REGIONAL_BASIN_INFLUENCE # Estimates surrounding land without following mountains or individual valleys.
+    var spawn_distance: float = Vector2(world_x, world_z).length() # Use unwarped world distance just like the terrain's starting-region transition.
+    var spawn_blend: float = smoothstep(TerrainHeightSampler.SPAWN_INNER_RADIUS, TerrainHeightSampler.SPAWN_OUTER_RADIUS, spawn_distance) # Match the terrain's gradual introduction of geological elevation.
+    regional_height = lerpf(TerrainHeightSampler.SPAWN_FLAT_HEIGHT, regional_height, spawn_blend) # Select water bands beneath the lowered starting region rather than the unmodified geological shelf.
     var water_coordinate: float = (regional_height - TerrainConfiguration.WATER_LEVEL_CLEARANCE - TerrainConfiguration.WATER_LEVEL_OFFSET) / TerrainHeightSampler.TIER_HEIGHT # Finds the highest water band safely below the region.
     var water_tier_index: int = clampi(floori(water_coordinate), 0, TerrainHeightSampler.TIER_LEVEL_COUNT - 1) # Restricts water to established geological elevation provinces.
     return float(water_tier_index) * TerrainHeightSampler.TIER_HEIGHT + TerrainConfiguration.WATER_LEVEL_OFFSET # Returns the shared deterministic water elevation.
