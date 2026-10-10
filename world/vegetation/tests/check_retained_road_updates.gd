@@ -50,6 +50,7 @@ func run() -> void: # Exercise production retained-candidate components and coal
     var colours: Array[Color] = [Color.RED, Color.BLUE] # Keep appearance tied to each candidate.
     var limits: Array[float] = [0.4, 0.4] # Represent retained probability thresholds.
     var batch: RoadFilteredFloraBatch = flora._add_batch(chunk, 0, transforms, colours, limits, Vector2.ZERO, false) # Create the production component without synchronous queries.
+    assert(not batch.visible) # Hide default instance transforms until the initial batch upload completes.
     batch.apply_visibility() # Install initial visible membership.
     var expected_buffer: PackedFloat32Array = PackedFloat32Array([transforms[0].basis.x.x, transforms[0].basis.y.x, transforms[0].basis.z.x, 8, transforms[0].basis.x.y, transforms[0].basis.y.y, transforms[0].basis.z.y, 4, transforms[0].basis.x.z, transforms[0].basis.y.z, transforms[0].basis.z.z, 8, 1, 0, 0, 1, 1, 0, 0, 100, 0, 1, 0, 8, 0, 0, 1, 8, 0, 0, 1, 1]) # Match the documented row-major transform and colour layout.
     assert(batch.multimesh.buffer == expected_buffer) # Verify complete engine buffer storage without relying on the dummy renderer's individual-instance getter.

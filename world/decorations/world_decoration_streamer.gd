@@ -24,6 +24,7 @@ var _pending_chunks: Array[Vector2i] = [] # Holds missing chunks in near-to-far 
 var _pending_chunk_index: int = 0 # Tracks the next queued coordinate without repeatedly shifting the array.
 var _pending_lod_updates: Array[Vector2i] = [] # Holds retained chunks that crossed a visual detail boundary.
 var _pending_lod_index: int = 0 # Tracks the next LOD update without shifting the queue.
+var _lod_updating: bool = false # Prevents overlapping LOD consumers while operation admission yields.
 var _last_origin_local_position: Vector2 = Vector2(INF, INF) # Detects floating-origin changes so loaded decoration chunks remain aligned.
 var _state_refresh_elapsed: float = 0.0 # Accumulates time between inexpensive stream-state checks.
 var _initializing = false
@@ -227,7 +228,7 @@ func _queue_lod_updates() -> void: # Queues retained chunks for bounded visual d
                 if maxi(absi(offset_x), absi(offset_z)) != ring: # Skips coordinates inside the current perimeter.
                     continue # Continues until reaching the active ring edge.
                 var chunk_coordinate: Vector2i = _current_chunk_coordinate + Vector2i(offset_x, offset_z) # Converts the ring offset into absolute chunk space.
-                if _chunks.has(chunk_coordinate): # Detects a retained chunk requiring a tier check.
+                if _chunks.has(chunk_coordinate) and _chunks[chunk_coordinate].get_lod_level() != _get_lod_level(ring): # Queue only retained chunks that actually need a tier change.
                     _pending_lod_updates.append(chunk_coordinate) # Queues near-to-far work without rebuilding unchanged tiers immediately.
 
 func _apply_pending_lod_updates() -> void:
@@ -239,17 +240,29 @@ func _apply_pending_lod_updates() -> void:
     _profile__apply_pending_lod_updates()
     RuntimeProfiler.end(_profile_token)
 
-func _profile__apply_pending_lod_updates() -> void: # Applies only a few retained-chunk LOD changes during the current rendered frame.
-    var updates_applied: int = 0 # Tracks work against the per-frame LOD rebuild budget.
-    while updates_applied < LOD_UPDATES_PER_FRAME and _pending_lod_index < _pending_lod_updates.size():
-        if GenerationScheduler.instance != null and Time.get_ticks_usec() >= GenerationScheduler.instance._deadline: return # Continues while budget and queued work remain.
-        var chunk_coordinate: Vector2i = _pending_lod_updates[_pending_lod_index] # Retrieves the next retained coordinate without shifting the queue.
-        _pending_lod_index += 1 # Advances sequentially to the next item.
-        if not _chunks.has(chunk_coordinate): # Detects a chunk unloaded after the queue was built.
-            continue # Skips stale work safely.
-        var chunk: WorldDecorationChunk = _chunks[chunk_coordinate] # Retrieves the retained object chunk.
-        chunk.set_lod_level(_get_lod_level(_get_chunk_distance(chunk_coordinate))) # Rebuilds buffers only if this chunk actually crossed an LOD tier.
-        updates_applied += 1 # Consumes one bounded update slot even when the chunk was already on the correct tier.
+func _profile__apply_pending_lod_updates() -> void: # Starts one bounded LOD consumer without admitting concurrent frame work.
+    if _lod_updating or _pending_lod_index >= _pending_lod_updates.size(): return # Skip unchanged or already running LOD work.
+    _lod_updating = true # Reserve the consumer before any scheduler yield.
+    _apply_lod_updates_incremental(GenerationScheduler.instance) # Admit changed chunks through the shared engine-operation budget.
+
+func _apply_lod_updates_incremental(scheduler: GenerationScheduler) -> void: # Updates actual changed tiers with stale-travel checks after admission.
+    var updates_applied: int = 0 # Bound work when the synchronous fallback has no scheduler.
+    while updates_applied < LOD_UPDATES_PER_FRAME and _pending_lod_index < _pending_lod_updates.size(): # Visit only pending actual changes.
+        var cell: Vector2i = _pending_lod_updates[_pending_lod_index] # Capture a requested retained coordinate.
+        _pending_lod_index += 1 # Consume the queue slot before yielding to other world work.
+        if not _chunks.has(cell): continue # Ignore chunks unloaded after queue construction.
+        var chunk: WorldDecorationChunk = _chunks[cell] # Retain the exact node identity across scheduler waits.
+        var lod: int = _get_lod_level(_get_chunk_distance(cell)) # Resolve the current desired distance tier.
+        if chunk.get_lod_level() == lod: continue # Avoid consuming operation admission for unchanged tiers.
+        if scheduler != null and not await scheduler.operation_checkpoint(self): break # Separate changed chunks from every other costly generation operation.
+        if not is_instance_valid(chunk) or chunk.is_queued_for_deletion() or not _chunks.has(cell) or _chunks[cell] != chunk: continue # Discard obsolete node identities after travel.
+        lod = _get_lod_level(_get_chunk_distance(cell)) # Recompute desired detail after movement during admission.
+        if chunk.get_lod_level() == lod: continue # Avoid updating a tier that became unnecessary while waiting.
+        var started: int = Time.get_ticks_usec() # Measure first-visit buffers and subsequent mesh swaps alike.
+        chunk.set_lod_level(lod) # Reuse persistent tree buffers and lazy cached rock batches.
+        if scheduler != null: scheduler.record_operation(started) # Expose the remaining indivisible engine-operation cost.
+        updates_applied += 1 # Count actual changed chunks rather than no-op queue entries.
+    _lod_updating = false # Let the next frame consume remaining or newly queued changes.
 
 func _build_incremental(cell: Vector2i, scheduler: GenerationScheduler):
     scheduler.active_owner = self

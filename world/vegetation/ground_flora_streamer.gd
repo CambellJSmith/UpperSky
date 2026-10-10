@@ -207,7 +207,7 @@ func _sample_species(species: int, chunk_origin: Vector2, transforms: Array[Tran
                 continue
             transforms.append(_make_transform(species, cell_x, cell_z, candidate, chunk_origin, height))
             colours.append(_get_colour(species, cell_x, cell_z, fertility, moisture, candidate))
-            limits.append(1.0 - roll / maxf(probability * altitude_weight * shore_weight, 0.000001)) # Preserve the original probability decision when road suppression changes.
+            limits.append(1.0 - roll / (probability * altitude_weight * shore_weight) if probability * altitude_weight * shore_weight > 0.0 else 1.0) # Preserve the original probability decision when road suppression changes.
 
 func _get_probability(species: int, fertility: float, moisture: float, patch: float, position: Vector2) -> float:
     match species:
@@ -464,7 +464,7 @@ func _sample_species_incremental(species: int, chunk_origin: Vector2, transforms
                 continue
             transforms.append(_make_transform(species, cell_x, cell_z, candidate, chunk_origin, height))
             colours.append(_get_colour(species, cell_x, cell_z, fertility, moisture, candidate))
-            limits.append(1.0 - roll / maxf(probability * altitude_weight * shore_weight, 0.000001)) # Preserve the original probability decision when road suppression changes.
+            limits.append(1.0 - roll / (probability * altitude_weight * shore_weight) if probability * altitude_weight * shore_weight > 0.0 else 1.0) # Preserve the original probability decision when road suppression changes.
 
 func _queue_incremental(cell: Vector2i):
     if _chunks.has(cell) or _building.has(cell): return
@@ -512,7 +512,7 @@ func _build_incremental(cell: Vector2i, scheduler: GenerationScheduler):
         var started: int = Time.get_ticks_usec() # Measure the indivisible batch allocation.
         var batch: RoadFilteredFloraBatch = _add_batch(chunk, species, batches[species][0], batches[species][1], batches[species][2], origin, false) # Retain candidates without unbudgeted road queries.
         scheduler.record_operation(started) # Include allocation in shared operation diagnostics.
-        if batch != null and not await _refresh_flora_batch(batch, Rect2(origin, Vector2.ONE * TerrainConfiguration.CHUNK_SIZE), scheduler): # Budget filtering before rendering the initial batch.
+        if batch != null and not await _refresh_flora_batch(batch, Rect2(origin, Vector2.ONE * TerrainConfiguration.CHUNK_SIZE), scheduler, cell): # Budget filtering before rendering the initial batch.
             chunk.queue_free() # Release incomplete membership results.
             _building.erase(cell) # Release the generation guard.
             return # Stop invalid installation.
@@ -547,14 +547,16 @@ func _refresh_paths_incremental(scheduler: GenerationScheduler) -> void: # Consu
                 if not await _refresh_flora_batch(child as RoadFilteredFloraBatch, area, scheduler): break # Stop when travel or teardown removes the batch.
     _path_refreshing = false # Allow later coalesced notifications to start another update.
 
-func _refresh_flora_batch(batch: RoadFilteredFloraBatch, area: Rect2, scheduler: GenerationScheduler) -> bool: # Spread road queries across scheduler slices and upload only changed membership.
+func _refresh_flora_batch(batch: RoadFilteredFloraBatch, area: Rect2, scheduler: GenerationScheduler, required_cell: Vector2i = INVALID_CHUNK) -> bool: # Spread road queries across scheduler slices and upload only changed membership.
     for index: int in range(batch.candidate_count()): # Check retained candidate positions without procedural sampling.
         if scheduler != null and not await scheduler.checkpoint(self): return false # Respect shared generation budget and pause state.
         if not is_instance_valid(batch) or batch.is_queued_for_deletion() or not batch.is_inside_tree() or batch.get_parent().is_queued_for_deletion(): return false # Cancel updates belonging to removed chunks.
+        if required_cell != INVALID_CHUNK and not _desired_chunks.has(required_cell): return false # Cancel in-flight initial filtering immediately after travel.
         batch.refresh_candidate(index, area, _road_suppression) # Skip queries outside the dirty road neighborhood.
     if not batch.needs_upload(): return true # Avoid unchanged rendering-server work.
     if scheduler != null and not await scheduler.operation_checkpoint(self): return false # Share expensive upload admission with terrain and decoration LOD work.
     if not is_instance_valid(batch) or batch.is_queued_for_deletion() or not batch.is_inside_tree() or batch.get_parent().is_queued_for_deletion(): return false # Recheck validity after upload admission yields.
+    if required_cell != INVALID_CHUNK and not _desired_chunks.has(required_cell): return false # Reject obsolete initial uploads after admission yields.
     var started: int = Time.get_ticks_usec() # Measure the compacted upload's indivisible cost.
     batch.apply_visibility() # Update the existing node and MultiMesh without regenerating flora.
     if scheduler != null: scheduler.record_operation(started) # Retain worst-operation diagnostics.

@@ -9,6 +9,7 @@ var _world_origin: Vector2 = Vector2.ZERO # Anchor candidate positions independe
 var _dirty: bool = true # Track whether visible membership needs a buffer update.
 
 func configure_candidates(transforms: Array[Transform3D], colours: Array[Color], limits: Array[float], origin: Vector2) -> void: # Retain the data needed for inexpensive road updates.
+    visible = false # Hide default instance transforms until initial road filtering and upload finish.
     _transforms = transforms # Keep deterministic local transforms for restoration and filtering.
     _colours = colours # Preserve candidate colours across compaction.
     _limits = limits # Keep the probability-derived acceptance thresholds.
@@ -42,4 +43,5 @@ func apply_visibility() -> void: # Compact visible candidates while retaining th
         colours.append(_colours[index]) # Keep its matching appearance.
     multimesh.instance_count = transforms.size() # Resize only when a membership update is committed.
     if not transforms.is_empty(): multimesh.buffer = InstanceTransformBuffer.pack(transforms, colours) # Upload the complete compacted batch in one operation.
+    visible = not transforms.is_empty() # Submit only complete nonempty visible membership.
     _dirty = false # Mark this visible membership as installed.
