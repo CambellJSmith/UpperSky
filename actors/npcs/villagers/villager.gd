@@ -350,7 +350,7 @@ func _profile__physics_process(delta: float) -> void:
         if not is_instance_valid(_update_player): # Support actors spawned before the player exists.
             _update_player = get_tree().get_first_node_in_group("player") as Node3D # Refresh the cached player reference.
         _update_cadence.distance_squared = global_position.distance_squared_to(_update_player.global_position) if is_instance_valid(_update_player) else 0.0 # Retain full updates when no player can be resolved.
-    delta = _update_cadence.physics_step(delta, combat.active or _action_remaining > 0.0 or is_instance_valid(ferry_route)) # Keep fights, actions and ferry boarding on the ordinary physics cadence.
+    delta = _update_cadence.physics_step(delta, combat.needs_immediate_update() or _action_remaining > 0.0 or is_instance_valid(ferry_route)) # Keep fights, actions and ferry boarding on the ordinary physics cadence.
     if delta <= 0.0: # Defer distant patrol and terrain work between updates.
         return # Preserve the current route state until the next scheduled update.
     var fighting = combat.tick(delta)

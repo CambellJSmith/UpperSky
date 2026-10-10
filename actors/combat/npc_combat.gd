@@ -95,6 +95,9 @@ func line_of_sight_to(body: Node3D) -> bool:
     var hit = actor.get_world_3d().direct_space_state.intersect_ray(query)
     return hit.is_empty() or hit.collider == body
 
+func needs_immediate_update() -> bool: # Let actor cadence preserve direct hostility and provocation reactions.
+    return active or attacking or _selection_timer <= 0.0 # Bypass distant scheduling when combat or a requested search is pending.
+
 func tick(delta: float) -> bool:
     if health.is_dead() or not actor.is_visible_in_tree(): # Skip perception for unavailable combatants.
         cancel() # Clear any pending strike.
@@ -103,7 +106,7 @@ func tick(delta: float) -> bool:
     if _selection_timer <= 0: # Respect perception cadence even when no hostile target exists.
         select_target()
         _selection_timer = PERCEPTION_INTERVAL # Restart the bounded search delay.
-    if health.is_dead() or not eligible(target) or not actor.is_visible_in_tree():
+    if not eligible(target): # Reuse the availability checks completed before perception.
         cancel()
         return false
     var distance = actor.global_position.distance_to(target.global_position)

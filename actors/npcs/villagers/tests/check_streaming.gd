@@ -9,9 +9,9 @@ func run():
     var paths = game.get_node("World/Paths")
     var player = game.get_node("DynamicEntities/Player")
     var startup_deadline: int = Time.get_ticks_msec() + 15000 # Bound initial collision-backed loading.
-    while not player.is_physics_processing() and Time.get_ticks_msec() < startup_deadline: # Wait for ready gameplay rather than a hardware-dependent frame count.
+    while not game.get_node("SaveSystem").ready_to_save and Time.get_ticks_msec() < startup_deadline: # Wait for ready gameplay rather than a hardware-dependent frame count.
         await process_frame # Let incremental startup complete.
-    assert(player.is_physics_processing(), "Startup did not finish") # Reject an incomplete streaming fixture.
+    assert(game.get_node("SaveSystem").ready_to_save and player.is_physics_processing(), "Startup did not finish") # Reject an incomplete streaming fixture.
     var sampler: SettlementSampler = SettlementSampler.for_terrain(terrain) # Select a town that has exterior residents.
     var absolute: Vector3 = terrain.local_to_world_position(player.global_position) # Locate the current search region.
     var centre: Vector2i = Vector2i((Vector2(absolute.x, absolute.z) / SettlementSampler.TOWN_CELL_SIZE).floor()) # Search near the real spawn.
@@ -19,7 +19,7 @@ func run():
     for z: int in range(-3, 4): # Examine nearby settlement regions.
         for x: int in range(-3, 4): # Find a town whose residents live in the overworld.
             var candidate: Dictionary = sampler.sample_town(centre + Vector2i(x, z)) # Inspect deterministic placement.
-            if not candidate.is_empty() and not CityGeometry.is_city(candidate): # Cities keep their population in a separate space.
+            if not candidate.is_empty() and not CityGeometry.is_city(candidate) and not population._sampler.town(candidate).is_empty(): # Require validated resident routes in the exterior space.
                 town = candidate # Retain an ordinary town.
                 break # Stop the current row after finding the fixture.
         if not town.is_empty(): break # Stop once a town is available.
