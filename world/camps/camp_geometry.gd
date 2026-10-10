@@ -36,7 +36,7 @@ func build(sampler: CampSampler, centre: Vector2, yaw: float, seed_value: int) -
     light.light_energy = 1.5
     light.omni_range = 9.0
     fire.add_child(light)
-    var tent_count: int = rng.randi_range(2, 4)
+    var tent_count: int = CampPopulation.count(seed_value) # Match tents to the deterministic camper population.
     for index: int in range(tent_count):
         var angle: float = TAU * float(index) / float(tent_count) + yaw
         var offset: Vector2 = Vector2(cos(angle), sin(angle)) * 6.5
