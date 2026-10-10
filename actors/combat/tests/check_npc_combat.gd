@@ -66,7 +66,7 @@ func run():
     await physics_frame
     npc._action_remaining = 0
     combat._cooldown = 0
-    assert(combat.tick(.01))
+    assert(combat.tick(NpcCombat.PERCEPTION_INTERVAL)) # Wait for the next bounded perception update after removing cover.
     var health = player.get_health_state()
     health.set_infinite_health_enabled(true)
     combat.tick(.5)

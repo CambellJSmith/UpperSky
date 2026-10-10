@@ -16,6 +16,8 @@ func _ready() -> void:
     _player = get_node("../DynamicEntities/Player") as FirstPersonPlayer
     _sampler = CampSampler.new(_terrain)
 
+    _terrain.origin_shifted.connect(_update_origin_positions) # Subscribe static scenery to completed origin shifts.
+
 func _process(delta: float) -> void:
     # Timing scopes are inactive until a console recording begins.
     if not RuntimeProfiler.recording:
@@ -36,10 +38,6 @@ func _profile__process(delta: float) -> void:
         if centre != _centre:
             _centre = centre
             _refresh()
-    # Correct origin shifts every frame; roots are outside DynamicEntities.
-    for root: Node3D in _cells.values():
-        if root != null:
-            root.position = _terrain.world_to_local_position(root.get_meta("world_position"))
     if not _pending.is_empty() and not _building:
         var cell = _pending.pop_front()
         if GenerationScheduler.instance == null: _build_cell(cell)
@@ -119,3 +117,8 @@ func _run_build(cell: Vector2i, scheduler: GenerationScheduler):
     scheduler.active_priority = 2
     await _build_cell_incremental(cell,scheduler)
     _building = false
+
+func _update_origin_positions() -> void: # Reposition retained static roots only after an origin shift.
+    for root: Node3D in _cells.values():
+        if root != null:
+            root.position = _terrain.world_to_local_position(root.get_meta("world_position"))

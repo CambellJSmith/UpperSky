@@ -18,8 +18,7 @@ func _init(terrain: InfiniteTerrain) -> void:
 func sample_cell(cell: Vector2i) -> Dictionary:
     if _cache.has(cell):
         return _cache[cell]
-    if _cache.size() > 256:
-        _cache.clear() # Bounds memory during unbounded travel; sampling is repeatable.
+    CacheEviction.make_room(_cache, 256) # Evict old samples progressively during unbounded travel.
     var rng: RandomNumberGenerator = RandomNumberGenerator.new()
     rng.seed = hash("camp:%d:%d:%d" % [TerrainHeightSampler.WORLD_SEED, cell.x, cell.y])
     var result: Dictionary = {}
@@ -98,8 +97,7 @@ func _is_suitable_incremental(point: Vector2, scheduler: GenerationScheduler) ->
 func sample_cell_incremental(cell: Vector2i, scheduler: GenerationScheduler) -> Dictionary:
     if _cache.has(cell):
         return _cache[cell]
-    if _cache.size() > 256:
-        _cache.clear() # Bounds memory during unbounded travel; sampling is repeatable.
+    CacheEviction.make_room(_cache, 256) # Evict old samples progressively during unbounded travel.
     var rng: RandomNumberGenerator = RandomNumberGenerator.new()
     rng.seed = hash("camp:%d:%d:%d" % [TerrainHeightSampler.WORLD_SEED, cell.x, cell.y])
     var result: Dictionary = {}

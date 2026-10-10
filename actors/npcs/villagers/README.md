@@ -67,3 +67,16 @@ The directed scores live in the existing persistent NPC loot records. `get_npc_a
 Road traffic creates two parties of 3–5 travellers per checked settlement road, travelling in opposite directions. Peasants and orcs make up most travellers; every party has a peasant or orc leader, with occasional wizards and knights. Fresh traffic identities are introduced every 180 seconds so a road does not stay empty after its first party leaves. Existing travellers continue their journeys; this does not teleport them back. The 72-NPC local limit remains. Residents and travellers each have their own 48-NPC ceiling, leaving room for both rather than letting either population fill all slots. The three-minute cadence targets a sighting at least every five minutes near a loaded, walkable road, subject to visibility and local combat.
 
 Town and homestead populations refresh independently of road travellers, at higher scheduler priority. A pending regional journey validation cannot hold up a newly entered village. The resident allowance counts residents rather than all NPCs; towns provide six residents and two patrolling guards even when the road-traveller allowance is full. `tests/check_town_priority.gd` covers both starvation cases together.
+
+## Runtime Update Cadence
+
+Villagers retain collision-backed movement every physics tick within 80 metres of the player. Outside that range, peaceful patrols advance along checked routes at approximately ten updates per second out to 180 metres and four updates per second beyond it. Elapsed time is accumulated so reduced update frequency preserves travel speed. Active combat, explicit actions and ferry-route actors retain ordinary physics updates.
+
+Manual skeleton evaluation remains continuous within 40 metres, drops to approximately fifteen evaluations per second out to 120 metres, and five farther away. Combat and action poses stay continuous. Inventory revisions and night-form changes remain independent of pose timing. Streaming activation resets deferred time so suspended actors do not jump forward on reactivation.
+
+NPCs own their position updates. Population streamers manage activation and membership; floating-origin events reposition overworld actors, including suspended actors, without recurring streamer transform writes.
+
+Run the cadence and streaming regressions through the shared scene-first runner:
+
+- `godot --headless --path . --script application/streaming/tests/run_regression.gd -- actors/npcs/villagers/tests/check_update_cadence.gd`
+- `godot --headless --path . --script application/streaming/tests/run_regression.gd -- actors/npcs/villagers/tests/check_streaming.gd`

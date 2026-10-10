@@ -51,6 +51,8 @@ var _travel_trail: Array[Vector2] = []
 var _route_sampler: VillagerPopulationSampler
 var journey: Dictionary = {}
 var _visit_remaining := 0.0
+var _update_cadence: NpcUpdateCadence = NpcUpdateCadence.new() # Own animation and patrol timing without changing streaming ownership.
+var _update_player: Node3D # Cache the active player for distance sampling.
 
 func configure(terrain: InfiniteTerrain, definition: Dictionary) -> void:
     _loot_record = LootSession.get_record("npc:%s:%d:%d"%[definition.role,definition.model,definition.seed],definition.seed,true)
@@ -176,6 +178,11 @@ func _ready() -> void:
 
 func _profile__ready() -> void:
     add_to_group("npc")
+    NearbyActorIndex.invalidate() # Include newly spawned actors in subsequent perception queries.
+    _update_cadence.configure(get_instance_id()) # Spread distant update phases across the population.
+    _update_player = get_tree().get_first_node_in_group("player") as Node3D # Resolve the player once when available.
+    if _terrain != null: # Reposition overworld actors even while their own processing is disabled.
+        _terrain.origin_shifted.connect(_synchronize_world_position) # Update actor coordinates after an actual origin shift.
     health = DamageableHealth.new()
     health.name = "Health"
     health.bind_state(_loot_record.health)
@@ -237,8 +244,11 @@ func _process(delta: float) -> void:
     RuntimeProfiler.end(_profile_token)
 
 func _profile__process(delta: float) -> void:
-    _update_werewolf_form()
-    equipment.sync_inventory()
+    _update_werewolf_form() # Keep explicit time changes immediately visible independently of pose cadence.
+    equipment.sync_inventory() # Apply inventory revisions immediately, including looted corpse weapons.
+    delta = _update_cadence.animation_step(delta, combat.active or _action_remaining > 0.0) # Reduce distant skeleton work while retaining elapsed playback time.
+    if delta <= 0.0: # Keep the preceding pose between scheduled evaluations.
+        return # Avoid bone and equipment updates on skipped frames.
     if _loot_record.health.is_dead():
         equipment.update_pose()
         return
@@ -335,8 +345,14 @@ func _profile__physics_process(delta: float) -> void:
         _play("idle")
         return
     if (_terrain == null and _dungeon == null and _space == null) or route.size() < 2: return
-    # Absolute coordinates stay authoritative through floating-origin shifts.
-    global_position = _to_local(world_position)
+    _synchronize_world_position() # Restore explicit world-position changes without repeating identical transform writes.
+    if _update_cadence.distance_check_due(delta): # Reassess proximity at a bounded rate.
+        if not is_instance_valid(_update_player): # Support actors spawned before the player exists.
+            _update_player = get_tree().get_first_node_in_group("player") as Node3D # Refresh the cached player reference.
+        _update_cadence.distance_squared = global_position.distance_squared_to(_update_player.global_position) if is_instance_valid(_update_player) else 0.0 # Retain full updates when no player can be resolved.
+    delta = _update_cadence.physics_step(delta, combat.needs_immediate_update() or _action_remaining > 0.0 or is_instance_valid(ferry_route)) # Keep fights, actions and ferry boarding on the ordinary physics cadence.
+    if delta <= 0.0: # Defer distant patrol and terrain work between updates.
+        return # Preserve the current route state until the next scheduled update.
     var fighting = combat.tick(delta)
     if _was_in_combat and not fighting:
         _action_remaining = 0
@@ -422,12 +438,15 @@ func _profile__physics_process(delta: float) -> void:
 
     velocity.y = 0.0 if is_on_floor() else maxf(velocity.y-24*delta,-20)
     var before = global_position
-    move_and_slide()
+    if _update_cadence.uses_distant_movement() and not fighting and not is_instance_valid(ferry_route): # Use checked route travel for remote actors.
+        global_position += Vector3(velocity.x, 0.0, velocity.z) * delta # Preserve patrol speed without invoking movement collision for distant steps.
+    else: # Retain collision-backed movement during nearby interactions and combat.
+        move_and_slide() # Resolve close movement against active world collision.
     var actual = _to_world(global_position)
     var point = Vector2(actual.x,actual.z)
     var ground = _ground_height(point)
     # Sampled ground also supports routes at the edge of the collision stream.
-    if actual.y < ground-.10 or actual.y > ground+1.0:
+    if (_update_cadence.uses_distant_movement() and not fighting) or actual.y < ground-.10 or actual.y > ground+1.0:
         actual.y = ground+.04
         velocity.y = 0
     world_position = actual
@@ -436,7 +455,7 @@ func _profile__physics_process(delta: float) -> void:
         if _travel_trail.is_empty() or trail_point.distance_to(_travel_trail.back()) >= .5:
             _travel_trail.append(trail_point)
             if _travel_trail.size()>128: _travel_trail.pop_front()
-    global_position = _to_local(world_position)
+    _synchronize_world_position() # Write the final transform only when sampled grounding corrected it.
     if Vector2(velocity.x,velocity.z).length() > .1 and global_position.distance_to(before) < delta*.12:
         _blocked += delta
         if _blocked > 1.3:
@@ -474,7 +493,15 @@ func _play(state: String) -> void:
     var name = "Quaternius/"+String(CLIPS[state])
     if _animation.current_animation != name: _animation.play(name,.18)
 
+func _synchronize_world_position() -> void: # Keep absolute actor state aligned after explicit moves and origin shifts.
+    var expected: Vector3 = _to_local(world_position) # Resolve the current local position from authoritative world state.
+    if not global_position.is_equal_approx(expected): # Avoid sending an unchanged transform through the scene and physics servers.
+        global_position = expected # Apply only an actual position correction.
+
 func set_active(active: bool) -> void:
+    if is_processing() == active and is_physics_processing() == active: # Avoid repeating processing and collision changes every streamer frame.
+        return # Retain the current activation state.
+    _update_cadence.reset() # Drop deferred time whenever streaming changes activation.
     if not active and combat != null: combat.cancel()
     set_physics_process(active)
     set_process(active)
@@ -679,4 +706,5 @@ func trail_target(gap: float, follower: Vector2 = Vector2(INF,INF)) -> Vector2:
     return goal
 
 func _exit_tree() -> void:
+    NearbyActorIndex.invalidate() # Force subsequent perception queries to release this actor.
     if _space == null: persist_journey()

@@ -57,7 +57,6 @@ func _profile__process(delta: float):
     var point = Vector2(absolute.x,absolute.z)
     for key in _actors.keys():
         var npc: Villager = _actors[key]
-        npc.position = _terrain.world_to_local_position(npc.world_position)
         var distance = point.distance_to(Vector2(npc.world_position.x,npc.world_position.z))
         if distance > 650:
             remove_child(npc)
