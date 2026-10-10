@@ -2,7 +2,7 @@ extends RefCounted # Isolate world facts from authored phrases and interface sta
 class_name DialogueContext # Build a factual snapshot only when a conversation starts.
 
 static func build(npc: Villager, terrain: InfiniteTerrain, cycle: DayNightCycle) -> Dictionary: # Resolve shared context for humans and orcs in every populated space.
-    var context: Dictionary = {"species": npc.get_relationship_species(), "role": npc.role, "occupation": npc.role.replace("_", " "), "affection": npc.get_affection(), "time_of_day": "day"} # Use the actor's actual social and occupational state.
+    var context: Dictionary = {"species": npc.get_relationship_species(), "role": npc.role, "occupation": npc.role.trim_prefix("radiant_").replace("_", " "), "affection": npc.get_affection(), "time_of_day": "day"} # Use the actor's actual social and occupational state.
     if cycle != null: # Use the actual world clock when present.
         var hour: float = cycle.get_time_of_day_hours() # Resolve the current world hour.
         context["clock_time"] = cycle.get_formatted_time() # Preserve the game's time display format.

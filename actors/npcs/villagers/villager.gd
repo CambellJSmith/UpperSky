@@ -479,7 +479,7 @@ func _walkable(point: Vector2) -> bool:
     if _dungeon != null:
         var cell = Vector2i(floori(point.x/DungeonGeometryBuilder.CELL_SIZE+_dungeon._layout.width*.5),floori(point.y/DungeonGeometryBuilder.CELL_SIZE+_dungeon._layout.height*.5))
         return _dungeon._layout.is_walkable(cell) and absf(_ground_height(point)-world_position.y) < .55
-    if (_terrain.has_water_at(point) and _route_sampler._paths.bridge_height(point) == null) or BiomeProfile.is_lava(point) or _route_sampler.is_obstructed(point, role == "camper"): return false # Allow camp residents to walk within their clearing.
+    if (_terrain.has_water_at(point) and _route_sampler._paths.bridge_height(point) == null) or BiomeProfile.is_lava(point) or _route_sampler.is_obstructed(point, role in ["camper", "radiant_challenger"]): return false # Allow campers and radiant challengers to use reserved camp clearings.
     var height = _ground_height(point)
     return absf(height-world_position.y) < .55
 
@@ -730,3 +730,13 @@ func end_dialogue(owner: Node) -> void: # Release only the interface that owns t
 
 func get_dialogue_terrain() -> InfiniteTerrain: # Expose geographical context through a bounded public accessor.
     return _terrain # Distinguish overworld actors from interior populations.
+
+func set_encounter_destination(point: Vector2) -> void: # Steer a dedicated radiant actor using ordinary collision-backed NPC movement.
+    if role != "radiant_challenger" or not point.is_finite(): # Keep event steering separate from ordinary resident patrols.
+        return # Preserve unrelated actors' authored routes.
+    var current: Vector2 = Vector2(world_position.x, world_position.z) # Anchor the route to authoritative absolute actor state.
+    route.assign([point, current]) # Follow the live destination without teleporting the actor.
+    _waypoint = 0 # Direct the next actor update toward the event destination.
+    _wait = 0.0 # Remove patrol waiting while approaching or leaving.
+    _state = "run" # Make the actor visibly hurry toward the encounter.
+    _advance_after_wait = false # Avoid advancing the patrol during event steering.

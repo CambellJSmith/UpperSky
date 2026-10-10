@@ -1,12 +1,15 @@
 extends CanvasLayer # Coordinate talking with existing game interaction ownership.
 class_name DialogueInteraction # Resolve NPC targets and drive a separate editor-authored conversation menu.
 
+signal encounter_resolved(npc: Villager, accepted: bool) # Notify the director after the player resolves a spontaneous encounter.
+
 const TALK_DISTANCE: float = 3.0 # Keep conversations within ordinary interaction reach.
 const TARGET_INTERVAL: float = 0.12 # Bound prompt raycasts independently of rendering speed.
 @onready var _player: FirstPersonPlayer = $"../DynamicEntities/Player" # Resolve the existing gameplay input owner.
 @onready var _terrain: InfiniteTerrain = $"../World/Terrain" # Resolve the actual procedural geography.
 @onready var _menu: DialogueMenu = $Menu # Resolve the composed menu scene.
 @onready var _prompt: Label = $Prompt # Resolve the authored interaction prompt.
+var _encounter_definition: Dictionary = {} # Retain the current unsolicited event decision until resolution.
 var _speaker: Villager # Retain the current live conversation target.
 var _target: Villager # Cache the prompt target between bounded raycasts.
 var _elapsed: float = 0.0 # Track the next prompt refresh.
@@ -17,6 +20,7 @@ var _cycle: DayNightCycle # Read the clock without repeatedly searching groups.
 func _ready() -> void: # Connect presentation to conversation state once.
     _cycle = get_tree().get_first_node_in_group(DayNightCycle.GROUP_NAME) as DayNightCycle # Resolve the optional world clock.
     _menu.topic_selected.connect(_speak) # Handle player-authored topic choices.
+    _menu.encounter_selected.connect(_resolve_encounter) # Handle explicit consent through one authoritative state transition.
     _menu.close_requested.connect(close_dialogue) # Centralize conversation cleanup.
     _prompt.hide() # Hide interaction hints until a valid target is found.
 
@@ -73,13 +77,16 @@ func open_dialogue(npc: Villager) -> bool: # Open a conversation only during act
     _context = DialogueContext.build(npc, _terrain, _cycle) # Resolve factual substitutions once rather than per frame.
     _turns.clear() # Restart topic variation for the new exchange.
     _player.set_gameplay_input_enabled(false) # Give the conversation exclusive player input.
-    _menu.present((npc.get_relationship_species() + " " + npc.role.replace("_", " ")).capitalize(), _line("greeting")) # Present the actual speaker and contextual opening line.
+    _menu.present((npc.get_relationship_species() + " " + npc.role.trim_prefix("radiant_").replace("_", " ")).capitalize(), _line("greeting")) # Present the actual speaker and contextual opening line.
     _prompt.hide() # Remove the interaction hint immediately.
     return true # Confirm successful menu ownership.
 
 func close_dialogue() -> void: # Restore gameplay after every conversation exit path.
     if _speaker == null and _context.is_empty(): # Avoid claiming input when this menu was never open.
         return # Preserve another interface's ownership.
+    var event_speaker: Villager = _speaker if is_instance_valid(_speaker) else null # Preserve a valid actor for the event completion signal.
+    var was_encounter: bool = not _encounter_definition.is_empty() # Treat every ordinary close as peaceful refusal.
+    _encounter_definition.clear() # Prevent duplicate consent resolution or reentrant callbacks.
     if is_instance_valid(_speaker): # Release a surviving actor's conversation reservation.
         _speaker.end_dialogue(self) # Resume ordinary wandering without resetting its route.
     _speaker = null # Drop the actor reference after release.
@@ -87,6 +94,8 @@ func close_dialogue() -> void: # Restore gameplay after every conversation exit 
     _menu.dismiss() # Hide the menu and its focus controls.
     if is_instance_valid(_player): # Restore controls only while the player still exists.
         _player.set_gameplay_input_enabled(true) # Return mouse capture and gameplay input.
+    if was_encounter: # Notify event ownership after ordinary conversation cleanup completes.
+        encounter_resolved.emit(event_speaker, false) # Closing without explicit agreement never changes affection.
 
 func _speak(topic: String) -> void: # Respond to a selected authored player phrase.
     if not _speaker_valid(): # Revalidate after an actor dies or unloads between frames.
@@ -128,3 +137,28 @@ func _exit_tree() -> void: # Release speaker ownership when the scene or interfa
         _speaker.end_dialogue(self) # Prevent a surviving actor from remaining in conversation idle.
     if not _context.is_empty() and is_instance_valid(_player) and _player.is_inside_tree(): # Restore controls if only the dialogue interface is removed.
         _player.set_gameplay_input_enabled(true) # Release this interface's input ownership during teardown.
+
+func can_start_encounter() -> bool: # Expose modal readiness without revealing controller internals to the director.
+    return _context.is_empty() and _gameplay_active() # Wait for live gameplay and exclusive conversation availability.
+
+func open_encounter(npc: Villager, kind: String) -> bool: # Start an unsolicited conversation only after the actor arrives.
+    var definition: Dictionary = RadiantEventPhrases.definition(kind, hash(str(npc.get_social_record().get("npc_id", npc.name))) if is_instance_valid(npc) else 0) # Resolve supported authored content before taking input.
+    if definition.is_empty() or not open_dialogue(npc): # Reuse ordinary reach, health, species and input ownership checks.
+        return false # Leave the current gameplay or menu undisturbed.
+    definition["opening"] = str(definition.opening).format(_context) # Reuse ordinary dynamic world terms in radiant invitation phrases.
+    _encounter_definition = definition # Retain the pending consent effect.
+    _menu.present_encounter(definition) # Offer event-specific acceptance and refusal controls.
+    return true # Confirm that the actor has started its radiant conversation.
+
+func _resolve_encounter(accepted: bool) -> void: # Apply consent exactly once before releasing the conversation.
+    if _encounter_definition.is_empty(): # Reject stale button signals after an event has ended.
+        return # Avoid changing affection from an ordinary conversation.
+    if not _speaker_valid(): # Revalidate combat, death, range and streaming at the moment of selection.
+        close_dialogue() # Treat an invalid conversation as cancellation.
+        return # Do not create hostility after the actor becomes unavailable.
+    var npc: Villager = _speaker # Preserve the accepted actor across menu cleanup.
+    if accepted and _encounter_definition.get("hostile_on_accept", false): # Require explicit consent before initiating the declared battle.
+        npc.set_affection(AffectionState.HATE) # Immediately trigger the existing hostility perception policy.
+    _encounter_definition.clear() # Suppress the ordinary-close refusal callback during explicit resolution.
+    close_dialogue() # Restore gameplay and resume actor simulation before event scheduling continues.
+    encounter_resolved.emit(npc, accepted) # Report the player's explicit event decision once.
