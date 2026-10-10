@@ -6,6 +6,8 @@ signal origin_shifted # Notify static scenery after a completed floating-origin 
 const WATER_PRESENCE_EPSILON: float = 0.02 # Matches shoreline clipping tolerance when deciding whether a real water volume exists.
 const INVALID_WATER_CELL: Vector2i = Vector2i(2_147_483_647, 2_147_483_647) # Forces the first exact water query to populate its cell cache.
 
+const INACTIVE_COLLISION_LIMIT: int = 16 # Bound reusable distant physics independently of the visual radius.
+var _inactive_collisions: Array[TerrainChunk] = [] # Keep inactive shapes in least-recently-used order.
 const HEIGHT_CACHE_LIMIT = 32768
 var _height_cache: Dictionary = {}
 var _building: Dictionary = {}
@@ -144,6 +146,7 @@ func _refresh_streaming_set(centre: Vector2i) -> void: # Recalculates all chunks
     for chunk_coordinate: Vector2i in chunks_to_remove: # Removes every chunk no longer required around the player.
         var chunk: TerrainChunk = _chunks[chunk_coordinate] # Retrieves the streamable chunk node being discarded.
         _chunks.erase(chunk_coordinate) # Removes the coordinate from the active chunk lookup immediately.
+        _inactive_collisions.erase(chunk) # Release cache ownership when a visual chunk unloads.
         chunk.queue_free() # Releases the chunk node, ground mesh, water mesh, and any collision at the end of the frame.
     _update_collision_states() # Re-evaluates collision for retained chunks around the new centre.
 
@@ -199,14 +202,31 @@ func _prepare_background_chunk(cell: Vector2i, scheduler: GenerationScheduler):
         _building.erase(cell)
         _pending_chunks.append(cell)
 
-func _install_background_chunk(cell: Vector2i, data: Array):
-    _building.erase(cell)
-    if _chunks.has(cell) or not _desired_chunks.has(cell):
-        if GenerationScheduler.instance != null: GenerationScheduler.instance.stale_jobs += 1
-        return
-    var token = RuntimeProfiler.begin("terrain.install_chunk") if RuntimeProfiler.recording else -1
-    _install_meshes(cell,_mesh_builder.mesh_from_arrays(data[0]),_water_mesh_builder.mesh_from_arrays(data[1]))
-    if RuntimeProfiler.recording: RuntimeProfiler.end(token)
+func _install_background_chunk(cell: Vector2i, data: Array) -> void: # Spread uploads and physics preparation across admitted engine-operation frames.
+    var scheduler: GenerationScheduler = GenerationScheduler.instance # Keep the owning scheduler stable across yields.
+    if not await scheduler.operation_checkpoint(self): return # Stop safely during pause or teardown.
+    if not _can_install(cell): return # Discard obsolete buffers before uploading anything.
+    var started: int = Time.get_ticks_usec() # Measure only the ground upload stage.
+    var ground: ArrayMesh = _mesh_builder.mesh_from_arrays(data[0]) # Upload the ground surface without combining other heavy stages.
+    scheduler.record_operation(started) # Expose indivisible ground upload cost.
+    if not await scheduler.operation_checkpoint(self): return # Defer the water upload to a later frame.
+    if not _can_install(cell): return # Recheck streaming demand after every yield.
+    started = Time.get_ticks_usec() # Begin the water upload measurement.
+    var water: ArrayMesh = _water_mesh_builder.mesh_from_arrays(data[1]) # Upload the optional water surface separately.
+    scheduler.record_operation(started) # Expose indivisible water upload cost.
+    if not await scheduler.operation_checkpoint(self): return # Defer node and physics installation to another frame.
+    if not _can_install(cell): return # Avoid duplicate installation after an explicit teleport build.
+    started = Time.get_ticks_usec() # Begin the node and near-collider installation measurement.
+    _install_meshes(cell, ground, water, data[2]) # Install consistent ground, water and exact CPU collision triangles together.
+    scheduler.record_operation(started) # Record the final installation cost.
+    _building.erase(cell) # Retain the in-flight guard until all stages have completed.
+
+func _can_install(cell: Vector2i) -> bool: # Guard every resumed stage against travel and synchronous replacement.
+    if _chunks.has(cell) or not _desired_chunks.has(cell): # Detect an obsolete generation result.
+        _building.erase(cell) # Release the pending guard before discarding the result.
+        if GenerationScheduler.instance != null: GenerationScheduler.instance.stale_jobs += 1 # Report stale staged results.
+        return false # Release staged resources without touching the active scene.
+    return true # Continue while the current streaming set still requires this coordinate.
 
 
 func _build_initial_collision_area(centre: Vector2i) -> void: # Builds all chunks required for safe spawn collision before ordinary bounded streaming begins.
@@ -234,14 +254,14 @@ func _profile__build_chunk(chunk_coordinate: Vector2i) -> void: # Generates one 
     var water_mesh: ArrayMesh = _water_mesh_builder.build_chunk_mesh(chunk_coordinate) # Generates only submerged water polygons and sealed local level transitions.
     _install_meshes(chunk_coordinate,terrain_mesh,water_mesh)
 
-func _install_meshes(chunk_coordinate: Vector2i, terrain_mesh: ArrayMesh, water_mesh: ArrayMesh):
+func _install_meshes(chunk_coordinate: Vector2i, terrain_mesh: ArrayMesh, water_mesh: ArrayMesh, faces: PackedVector3Array = PackedVector3Array()):
     var chunk: TerrainChunk = TerrainChunk.new() # Creates a lightweight streamable terrain body.
     chunk.name = "TerrainChunk_%d_%d" % [chunk_coordinate.x, chunk_coordinate.y] # Gives the runtime node a coordinate-derived diagnostic name.
     chunk.position = _get_chunk_local_position(chunk_coordinate) # Places local vertices relative to the current floating-world origin.
     add_child(chunk) # Adds the generated chunk to the active world scene.
-    chunk.configure(terrain_mesh, water_mesh) # Assigns the generated ground and optional water geometry and creates runtime nodes.
+    chunk.configure(terrain_mesh, water_mesh, faces) # Assigns the generated ground and optional water geometry and creates runtime nodes.
     _chunks[chunk_coordinate] = chunk # Registers the chunk for streaming, collision, and unloading.
-    chunk.set_collision_active(_is_collision_coordinate(chunk_coordinate)) # Enables exact ground collision immediately when the chunk is near the player.
+    _set_chunk_collision(chunk, _is_collision_coordinate(chunk_coordinate)) # Enables exact ground collision immediately when the chunk is near the player.
 
 func _get_player_world_position() -> Vector2: # Converts the player's local scene position into an absolute procedural-world coordinate.
     return Vector2(_player.global_position.x, _player.global_position.z) + _world_origin_offset # Adds the accumulated floating-origin offset to the local position.
@@ -279,7 +299,19 @@ func _is_collision_coordinate(chunk_coordinate: Vector2i) -> bool: # Determines 
 func _update_collision_states() -> void: # Enables exact ground collision nearby and releases it from distant visual chunks.
     for chunk_coordinate: Vector2i in _chunks.keys(): # Visits every currently loaded chunk.
         var chunk: TerrainChunk = _chunks[chunk_coordinate] # Retrieves the streamable terrain body for this coordinate.
-        chunk.set_collision_active(_is_collision_coordinate(chunk_coordinate)) # Applies the collision state required by player distance.
+        _set_chunk_collision(chunk, _is_collision_coordinate(chunk_coordinate)) # Applies the collision state required by player distance.
+
+func _set_chunk_collision(chunk: TerrainChunk, enabled: bool) -> void: # Retain recently used distant shapes within a fixed memory bound.
+    var was_active: bool = chunk._collision_active # Identify actual transitions out of the physical neighbourhood.
+    chunk.set_collision_active(enabled) # Reattach cached geometry before considering a rebuild.
+    if enabled: # Remove active shapes from the inactive eviction queue.
+        _inactive_collisions.erase(chunk) # Keep active collision outside the inactive cache limit.
+    elif was_active: # Record only newly inactive shapes in recency order.
+        _inactive_collisions.erase(chunk) # Avoid retaining duplicate cache entries.
+        _inactive_collisions.append(chunk) # Prefer shapes from the most recently visited neighbourhood.
+    while _inactive_collisions.size() > INACTIVE_COLLISION_LIMIT: # Enforce the bound during unbounded travel.
+        var oldest: TerrainChunk = _inactive_collisions.pop_front() # Evict the least recently active retained collider.
+        oldest.release_cached_collision() # Release expensive physics data without unloading the visible terrain.
 
 func _create_terrain_material() -> StandardMaterial3D: # Creates the shared material used by every generated terrain surface.
     var material: StandardMaterial3D = StandardMaterial3D.new() # Allocates one reusable physically based terrain material.
