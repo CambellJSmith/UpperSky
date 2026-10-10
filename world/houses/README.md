@@ -40,6 +40,8 @@ add_child(house)
 - Roofs: blue-grey slate with overlapping tiles, or golden thatch with raised reed bundles, uneven eaves and a rounded ridge. Towers and some cottages use hipped roofs; other houses use gables.
 - Details: pitched gable framing, multi-pane windows, shutters, plank doors, iron fittings, stone thresholds, optional supported porches, and optional brick chimneys with caps and dark flue openings.
 
+Masonry blocks, siding planks, slate tiles and thatch bundles use broader spacing for a slightly simpler appearance and less generated geometry. Shared spacing constants keep immediate and incremental generation consistent; the wall relief, overlapping roofs, raised thatch folds and structural framing remain.
+
 The geometry batches detail into one mesh per material rather than one node per brick, board or roof tile. Foundation, floor footprint, roof and chimney collisions are separate shapes under one static body. Houses are solid exterior buildings: doors and windows are decorative, and interior rooms are not generated.
 
 Generated children are temporary and not serialized with the house node; the saved recipe is the source of truth. Geometry/materials require no imported art assets.
@@ -50,6 +52,7 @@ After the usual Godot editor import, run:
 
 ```sh
 godot --headless --path . --script res://world/houses/tests/check_generation.gd
+godot --headless --path . --script res://world/houses/tests/check_build_paths.gd
 godot --headless --path . --script res://world/houses/tests/check_showcase.gd
 ```
 
