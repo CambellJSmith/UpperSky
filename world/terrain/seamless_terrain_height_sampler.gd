@@ -7,7 +7,7 @@ func _get_local_water_level(regional_height: float) -> float: # Replaces hard wa
 func sample_height(world_x: float, world_z: float) -> float:
     var point := Vector2(world_x, world_z)
     var height := BiomeProfile.height(point, super.sample_height(world_x, world_z))
-    return height + rocky_mountain_uplift(point)
+    return WaterBodyPlan.shape_height(point, height + rocky_mountain_uplift(point)) # Resolve the basin shore after biome and mountain terrain shaping.
 
 static func rocky_mountain_uplift(point: Vector2) -> float:
     # Compact ranges fill the temperate margins between broad biome centres.

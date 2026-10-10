@@ -93,7 +93,7 @@ func _find_shoreline_spawn_horizontal() -> Vector2: # Finds dry low-slope terrai
                 var candidate_position: Vector2 = refined_dry_position + inland_direction * SHORE_SPAWN_INLAND_DISTANCE # Moves the player a safe but still shoreline-adjacent distance inland.
                 if _terrain.has_water_at(candidate_position): # Defensively handles irregular cell clipping that bends around the radial transition.
                     candidate_position = refined_dry_position # Falls back to the verified dry boundary sample rather than ever choosing water.
-                var candidate_score: float = _score_shoreline_spawn(candidate_position) # Measures dryness, bank height, slope, and travel distance.
+                var candidate_score: float = _score_shoreline_spawn(candidate_position, _terrain.get_water_level_at(wet_position)) # Measures dryness, bank height, slope, and travel distance.
                 if candidate_score < best_score: # Detects the safest and most natural shoreline start found so far.
                     best_score = candidate_score # Stores the improved deterministic score.
                     best_position = candidate_position # Stores the associated dry shoreline position.
@@ -114,11 +114,11 @@ func _refine_shoreline_dry_position(dry_position: Vector2, wet_position: Vector2
             refined_dry = midpoint # Moves the dry boundary toward the water while retaining a verified land point.
     return refined_dry # Returns the closest verified dry sample after bounded refinement.
 
-func _score_shoreline_spawn(candidate_position: Vector2) -> float: # Scores one dry shoreline point for low slope and a natural low-bank elevation.
+func _score_shoreline_spawn(candidate_position: Vector2, adjacent_water_level: float) -> float: # Scores one dry shoreline point for low slope and a natural low-bank elevation.
     if _terrain.has_water_at(candidate_position): # Rejects any candidate that resolves inside rendered water.
         return INF # Prevents a wet point from becoming the selected player start.
     var centre_height: float = _terrain.get_height_at(candidate_position) # Reads the exact terrain elevation beneath the candidate.
-    var water_level: float = _terrain.get_water_level_at(candidate_position) # Reads the local flat water band adjacent to the shoreline.
+    var water_level: float = adjacent_water_level # Scores dry land against the verified adjacent water body.
     var dry_clearance: float = centre_height - water_level # Measures how far the candidate stands above the local water surface.
     if dry_clearance < SHORE_MINIMUM_DRY_CLEARANCE: # Rejects land too close to the water plane for a reliable visibly dry start.
         return INF # Keeps the final spawn safely above the shoreline clipping tolerance.

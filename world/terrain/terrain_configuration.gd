@@ -3,7 +3,7 @@ class_name TerrainConfiguration # Makes shared terrain dimensions available to g
 
 const CHUNK_SIZE: float = 256.0 # Covers large geographic sections so mountain provinces and valleys read at monumental scale.
 const CHUNK_RESOLUTION: int = 33 # Creates an eight-metre vertex grid that preserves the deliberately coarse terrain silhouette.
-const WATER_RESOLUTION: int = 17 # Creates a sixteen-metre water grid before exact triangle clipping to limit extra procedural sampling cost.
+const WATER_RESOLUTION: int = CHUNK_RESOLUTION # Clips water against the exact final ground triangle grid.
 const WATER_LEVEL_OFFSET: float = -120.0 # Places each water surface below its surrounding regional shelf so only valleys and basins flood.
 const WATER_LEVEL_CLEARANCE: float = 96.0 # Requires the general regional surface to sit safely above the next higher water band before switching levels.
 const WATER_REGIONAL_PLATEAU_INFLUENCE: float = 0.24 # Lets broad local uplands influence water-band selection without making individual lakes slope.

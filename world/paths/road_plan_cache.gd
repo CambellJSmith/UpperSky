@@ -1,7 +1,7 @@
 extends RefCounted
 class_name RoadPlanCache
 
-const VERSION := 4
+const VERSION := 5 # Regenerates roads against the planned basin terrain.
 const LIMIT := 512
 var directory: String
 var writes := 0

@@ -23,4 +23,4 @@ func generate() -> Array:
     faces.resize(indices.size()) # Allocate the complete collision buffer once.
     for index: int in range(indices.size()): # Expand indexed triangles without accessing rendering resources.
         faces[index] = collision_vertices[indices[index]] # Preserve the original engine collision triangle order and positions.
-    return [ground, water.build_chunk_arrays(cell), faces] # Hand only plain buffers back to the scene thread.
+    return [ground, water.build_chunk_arrays(cell, ground), faces] # Hand only plain buffers back to the scene thread.

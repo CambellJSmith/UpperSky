@@ -38,15 +38,15 @@ func check() -> void:
     var river := BiomeProfile.region(Vector2i(-1,0))
     var centre: Vector2 = river.centre
     for local_z in [-600.0,-320.01,-319.99,-304.01,-303.99,0.0,319.99,320.01,335.99,336.01,600.0]:
-        var point := centre+Vector2(0,local_z)
+        var point := centre+Vector2(BiomeProfile.river_x(local_z, river.phase),local_z)
         var expected: float = river.sea + (64.0 if local_z < -320.0 else (32.0 if local_z<320.0 else 0.0))
         assert(is_equal_approx(terrain.get_water_level_at(point),expected), "River reach/pool height")
     # Flat height within cells, including negative coordinates and chunk seams.
     for point in [Vector2(-256.01,-16.01),Vector2(255.99,255.99),centre+Vector2(16,48)]:
-        var origin: Vector2 = (point/16.0).floor()*16.0
-        var height := terrain.get_water_level_at(origin+Vector2(.01,.01))
-        for offset in [Vector2(15.99,.01),Vector2(.01,15.99),Vector2(15.99,15.99)]:
-            assert(is_equal_approx(height,terrain.get_water_level_at(origin+offset)))
+        var origin: Vector2 = (point/WaterBodyPlan.GRID_SPACING).floor()*WaterBodyPlan.GRID_SPACING # Uses the actual final ground lattice.
+        var height: float = WaterBodyPlan.definition_at(origin+Vector2.ONE*4.0).surface_height # Tests planned calm levels independently from dry occupancy.
+        for offset in [Vector2(7.99,.01),Vector2(.01,7.99),Vector2(7.99,7.99)]:
+            assert(is_equal_approx(height,float(WaterBodyPlan.definition_at(origin+offset).surface_height))) # Verifies the reach stays flat across the ground cell.
     terrain.free()
     print("PASS: ",triangles," horizontal water triangles; shoreline/gameplay parity; river levels and chunk boundaries")
     quit()
