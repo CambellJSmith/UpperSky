@@ -269,6 +269,7 @@ func _rebase_world_if_needed() -> void: # Moves active transforms toward local o
     for chunk_coordinate: Vector2i in _chunks.keys(): # Visits every loaded terrain and water chunk after updating the origin offset.
         var chunk: TerrainChunk = _chunks[chunk_coordinate] # Retrieves the chunk requiring a new near-origin position.
         chunk.position = _get_chunk_local_position(chunk_coordinate) # Repositions ground and water together without regenerating absolute-coordinate geometry.
+    NearbyActorIndex.invalidate() # Discard combat buckets expressed in the preceding local origin.
     origin_shifted.emit() # Reposition static scenery only after the origin actually changes.
 
 func _is_collision_coordinate(chunk_coordinate: Vector2i) -> bool: # Determines whether one loaded chunk is close enough for physical interaction.

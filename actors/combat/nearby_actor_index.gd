@@ -31,3 +31,7 @@ static func nearby(tree: SceneTree, point: Vector3, radius: float) -> Array[Node
                     if is_instance_valid(actor) and actor.is_inside_tree() and point.distance_squared_to(actor.global_position) <= radius_squared: # Reject stale and distant actors before relationship checks.
                         result.append(actor) # Return a spatially eligible target candidate.
     return result # Supply the nearby snapshot.
+
+static func invalidate() -> void: # Discard snapshots after scene membership or origin changes.
+    _frame = -1 # Force the next query to rebuild the index.
+    _cells.clear() # Release actors from the stale coordinate space.

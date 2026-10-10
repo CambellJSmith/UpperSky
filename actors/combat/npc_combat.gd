@@ -6,12 +6,13 @@ const HOSTILE_THRESHOLD: float = 10.0
 const NOTICE_DISTANCE: float = 24.0
 const DISENGAGE_DISTANCE: float = 36.0
 const REACH: float = 1.8
+const PERCEPTION_INTERVAL: float = 0.25 # Bound target searches independently of target availability.
 const ATTACK_INTERVAL: float = 1.4
 var actor: CharacterBody3D
 var affection: AffectionState
 var health: HealthState
 var target: Node3D
-var _selection_timer := 0.0
+var _selection_timer: float = 0.0 # Retain the remaining perception delay.
 var active: bool = false
 var attacking: bool = false
 var _cooldown: float = 0.0
@@ -27,8 +28,10 @@ func configure(body: CharacterBody3D, relationship: AffectionState, vitality: He
     health = vitality
     affection.changed.connect(_affection_changed)
     health.died.connect(cancel)
+    _selection_timer = PERCEPTION_INTERVAL * float(body.get_instance_id() % 16) / 16.0 # Distribute ordinary searches across physics frames.
 
 func _affection_changed(_previous: float, current: float):
+    _selection_timer = 0.0 # React immediately when player affection changes.
     if current > HOSTILE_THRESHOLD and is_instance_valid(target) and target.is_in_group("player"): cancel()
 
 func provoke(source: Node3D):
@@ -93,10 +96,13 @@ func line_of_sight_to(body: Node3D) -> bool:
     return hit.is_empty() or hit.collider == body
 
 func tick(delta: float) -> bool:
+    if health.is_dead() or not actor.is_visible_in_tree(): # Skip perception for unavailable combatants.
+        cancel() # Clear any pending strike.
+        return false # Stop without building spatial candidates.
     _selection_timer -= delta
     if _selection_timer <= 0: # Respect perception cadence even when no hostile target exists.
         select_target()
-        _selection_timer = .25
+        _selection_timer = PERCEPTION_INTERVAL # Restart the bounded search delay.
     if health.is_dead() or not eligible(target) or not actor.is_visible_in_tree():
         cancel()
         return false
