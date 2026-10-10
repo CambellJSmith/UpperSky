@@ -46,3 +46,6 @@ Additional regressions, invoked through `tests/run_regression.gd -- <script>`:
 - `application/save/tests/check_background_save.gd`: detached mutable state, request coalescing, ordering, teardown and failed writes.
 - `world/terrain/tests/check_collision_cache.gd`: exact shape identity reuse, inactive physics removal, bounded eviction and actual ground after reactivation.
 - `application/streaming/tests/check_staged_install.gd`: multi-frame handoff, collision installation, stale travel cancellation and operation measurements.
+- `application/streaming/tests/check_worker_collision.gd`: independently generated ground/water parity with completed road masks, and exact collision output from the original engine mesh path.
+
+CPU collision positions use the same vertex snapping rule as [Godot's TriangleMesh implementation](https://github.com/godotengine/godot/blob/master/core/math/triangle_mesh.cpp), applied once per unique vertex. The parity check detects future engine changes to that rule. This avoids building the mesh-readback TriangleMesh and its separate CPU BVH on the main thread.
