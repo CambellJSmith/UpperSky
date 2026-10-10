@@ -50,7 +50,8 @@ var _current_chunk := INVALID_CHUNK
 var _last_local_origin := Vector2(INF, INF)
 var _refresh_elapsed := 0.0
 var _initialized := false
-var _path_dirty := {}
+var _path_dirty: Dictionary[Vector2i, Rect2] = {} # Coalesces road neighborhoods awaiting retained-candidate filtering.
+var _path_refreshing: bool = false # Prevents concurrent road-update consumers.
 
 func _ready() -> void:
     var terrain_node := get_node_or_null("../World/Terrain")
@@ -87,6 +88,7 @@ func _profile__process(delta: float) -> void:
             _current_chunk = player_chunk
             _refresh_streaming_set(_current_chunk)
     _build_pending_chunks()
+    _refresh_dirty_paths() # Update retained flora without resampling complete chunks.
 
 func _try_initialize() -> void:
     if _terrain == null or _player == null:
@@ -164,11 +166,12 @@ func _profile__build_chunk(coordinate: Vector2i) -> void:
     for species in range(SPECIES_NAMES.size()):
         var transforms: Array[Transform3D] = []
         var colours: Array[Color] = []
-        _sample_species(species, origin, transforms, colours)
-        _add_batch(chunk, species, transforms, colours)
+        var limits: Array[float] = [] # Retain road acceptance thresholds alongside terrain-valid candidates.
+        _sample_species(species, origin, transforms, colours, limits) # Sample expensive world data once.
+        _add_batch(chunk, species, transforms, colours, limits, origin) # Install and filter the retained batch.
     _chunks[coordinate] = chunk
 
-func _sample_species(species: int, chunk_origin: Vector2, transforms: Array[Transform3D], colours: Array[Color]) -> void:
+func _sample_species(species: int, chunk_origin: Vector2, transforms: Array[Transform3D], colours: Array[Color], limits: Array[float]) -> void:
     var cell_size: float = CELL_SIZES[species]
     var min_x := floori(chunk_origin.x / cell_size)
     var max_x := floori((chunk_origin.x + TerrainConfiguration.CHUNK_SIZE - 0.001) / cell_size)
@@ -181,13 +184,10 @@ func _sample_species(species: int, chunk_origin: Vector2, transforms: Array[Tran
                 continue
             if BiomeProfile.vegetation_weight(candidate) < 0.5:
                 continue
-            var path_suppression: float = TerrainPathSampler.get_grass_suppression(candidate,_terrain)
-            if path_suppression >= 0.995:
-                continue
             var fertility := _sample_noise(_fertility_noise, candidate)
             var moisture := _sample_noise(_moisture_noise, candidate)
             var patch := _sample_noise(_patch_noise, candidate)
-            var probability: float = _get_probability(species, fertility, moisture, patch, candidate) * (1.0 - path_suppression)
+            var probability: float = _get_probability(species, fertility, moisture, patch, candidate)
             var roll := _hash01(cell_x, cell_z, SALTS[species] + 11)
             if roll > probability:
                 continue
@@ -198,14 +198,16 @@ func _sample_species(species: int, chunk_origin: Vector2, transforms: Array[Tran
             var water_clearance := height - _sample_water_level(candidate)
             if water_clearance < MIN_WATER_CLEARANCES[species] or water_clearance > MAX_WATER_CLEARANCES[species]:
                 continue
+            var shore_weight: float = 1.0 # Retain the species-specific shore probability for later road filtering.
             if species != Species.REED:
-                var shore_weight := smoothstep(MIN_WATER_CLEARANCES[species], MIN_WATER_CLEARANCES[species] + 24.0, water_clearance)
+                shore_weight = smoothstep(MIN_WATER_CLEARANCES[species], MIN_WATER_CLEARANCES[species] + 24.0, water_clearance)
                 if roll > probability * altitude_weight * shore_weight:
                     continue
             if _sample_slope(candidate, height) > SLOPE_LIMITS[species]:
                 continue
             transforms.append(_make_transform(species, cell_x, cell_z, candidate, chunk_origin, height))
             colours.append(_get_colour(species, cell_x, cell_z, fertility, moisture, candidate))
+            limits.append(1.0 - roll / (probability * altitude_weight * shore_weight) if probability * altitude_weight * shore_weight > 0.0 else 1.0) # Preserve the original probability decision when road suppression changes.
 
 func _get_probability(species: int, fertility: float, moisture: float, patch: float, position: Vector2) -> float:
     match species:
@@ -254,9 +256,9 @@ func _get_colour(species: int, cell_x: int, cell_z: int, fertility: float, moist
     var brightness := lerpf(0.84, 1.16, _hash01(cell_x, cell_z, SALTS[species] + 37))
     return Color(clampf(colour.r * brightness, 0.0, 1.0), clampf(colour.g * brightness, 0.0, 1.0), clampf(colour.b * brightness, 0.0, 1.0), 1.0)
 
-func _add_batch(parent: Node3D, species: int, transforms: Array[Transform3D], colours: Array[Color]) -> void:
+func _add_batch(parent: Node3D, species: int, transforms: Array[Transform3D], colours: Array[Color], limits: Array[float], origin: Vector2, filter_now: bool = true) -> RoadFilteredFloraBatch: # Creates a retained-candidate batch rather than disposable road-dependent scenery.
     if transforms.is_empty():
-        return
+        return null # Avoid allocating an empty candidate batch.
     var multimesh := MultiMesh.new()
     multimesh.transform_format = MultiMesh.TRANSFORM_3D
     multimesh.use_colors = true
@@ -265,18 +267,22 @@ func _add_batch(parent: Node3D, species: int, transforms: Array[Transform3D], co
     var minimum_y := INF
     var maximum_y := -INF
     for index in range(transforms.size()):
-        multimesh.set_instance_transform(index, transforms[index])
-        multimesh.set_instance_color(index, colours[index])
         minimum_y = minf(minimum_y, transforms[index].origin.y)
         maximum_y = maxf(maximum_y, transforms[index].origin.y)
     multimesh.custom_aabb = AABB(Vector3(-6.0, minimum_y - 5.0, -6.0), Vector3(TerrainConfiguration.CHUNK_SIZE + 12.0, maxf(maximum_y - minimum_y + 12.0, 20.0), TerrainConfiguration.CHUNK_SIZE + 12.0))
-    var instance := MultiMeshInstance3D.new()
+    var instance: RoadFilteredFloraBatch = RoadFilteredFloraBatch.new() # Compose reusable road filtering with the render node.
     instance.name = SPECIES_NAMES[species]
     instance.multimesh = multimesh
     instance.visibility_range_end = VISIBILITY_RANGES[species]
     instance.visibility_range_end_margin = VISIBILITY_MARGIN
     instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if species == Species.SHRUB else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
     parent.add_child(instance)
+    instance.configure_candidates(transforms, colours, limits, origin) # Retain immutable terrain-valid instance data.
+    if filter_now: # Preserve the synchronous initialization fallback.
+        var area: Rect2 = Rect2(origin, Vector2.ONE * TerrainConfiguration.CHUNK_SIZE) # Cover every candidate during initial installation.
+        for index: int in range(instance.candidate_count()): instance.refresh_candidate(index, area, _road_suppression) # Apply current roads without resampling terrain.
+        instance.apply_visibility() # Upload the compact visible batch once.
+    return instance # Allow asynchronous installation to budget initial filtering.
 
 func _create_meshes() -> void:
     _meshes.clear()
@@ -420,7 +426,7 @@ func _update_chunk_positions() -> void:
     _last_local_origin = Vector2(local_origin.x, local_origin.z)
     for coordinate in _chunks.keys():
         _chunks[coordinate].position = _get_chunk_local_position(coordinate)
-func _sample_species_incremental(species: int, chunk_origin: Vector2, transforms: Array[Transform3D], colours: Array[Color], scheduler: GenerationScheduler) -> void:
+func _sample_species_incremental(species: int, chunk_origin: Vector2, transforms: Array[Transform3D], colours: Array[Color], limits: Array[float], scheduler: GenerationScheduler) -> void:
     var cell_size: float = CELL_SIZES[species]
     var min_x := floori(chunk_origin.x / cell_size)
     var max_x := floori((chunk_origin.x + TerrainConfiguration.CHUNK_SIZE - 0.001) / cell_size)
@@ -435,13 +441,10 @@ func _sample_species_incremental(species: int, chunk_origin: Vector2, transforms
                 continue
             if BiomeProfile.vegetation_weight(candidate) < 0.5:
                 continue
-            var path_suppression: float = TerrainPathSampler.get_grass_suppression(candidate,_terrain)
-            if path_suppression >= 0.995:
-                continue
             var fertility := _sample_noise(_fertility_noise, candidate)
             var moisture := _sample_noise(_moisture_noise, candidate)
             var patch := _sample_noise(_patch_noise, candidate)
-            var probability: float = _get_probability(species, fertility, moisture, patch, candidate) * (1.0 - path_suppression)
+            var probability: float = _get_probability(species, fertility, moisture, patch, candidate)
             var roll := _hash01(cell_x, cell_z, SALTS[species] + 11)
             if roll > probability:
                 continue
@@ -452,14 +455,16 @@ func _sample_species_incremental(species: int, chunk_origin: Vector2, transforms
             var water_clearance := height - _sample_water_level(candidate)
             if water_clearance < MIN_WATER_CLEARANCES[species] or water_clearance > MAX_WATER_CLEARANCES[species]:
                 continue
+            var shore_weight: float = 1.0 # Retain the species-specific shore probability for later road filtering.
             if species != Species.REED:
-                var shore_weight := smoothstep(MIN_WATER_CLEARANCES[species], MIN_WATER_CLEARANCES[species] + 24.0, water_clearance)
+                shore_weight = smoothstep(MIN_WATER_CLEARANCES[species], MIN_WATER_CLEARANCES[species] + 24.0, water_clearance)
                 if roll > probability * altitude_weight * shore_weight:
                     continue
             if _sample_slope(candidate, height) > SLOPE_LIMITS[species]:
                 continue
             transforms.append(_make_transform(species, cell_x, cell_z, candidate, chunk_origin, height))
             colours.append(_get_colour(species, cell_x, cell_z, fertility, moisture, candidate))
+            limits.append(1.0 - roll / (probability * altitude_weight * shore_weight) if probability * altitude_weight * shore_weight > 0.0 else 1.0) # Preserve the original probability decision when road suppression changes.
 
 func _queue_incremental(cell: Vector2i):
     if _chunks.has(cell) or _building.has(cell): return
@@ -482,30 +487,77 @@ func _build_incremental(cell: Vector2i, scheduler: GenerationScheduler):
     for species in range(SPECIES_NAMES.size()):
         var transforms: Array[Transform3D] = []
         var colours: Array[Color] = []
-        await _sample_species_incremental(species,origin,transforms,colours,scheduler)
-        batches.append([transforms,colours])
-    _building.erase(cell)
-    if _path_dirty.has(cell):
-        _path_dirty.erase(cell)
-        if _desired_chunks.has(cell): _pending_chunks.append(cell)
-        return
-    if not is_inside_tree() or not _desired_chunks.has(cell) or _chunks.has(cell): return
-    if not await scheduler.checkpoint(self): return
+        var limits: Array[float] = [] # Retain road-dependent acceptance separately from procedural sampling.
+        await _sample_species_incremental(species,origin,transforms,colours,limits,scheduler) # Generate stable terrain-valid candidates once.
+        batches.append([transforms,colours,limits]) # Keep appearance and probability records aligned.
+    if not is_inside_tree() or not _desired_chunks.has(cell) or _chunks.has(cell):
+        _building.erase(cell) # Release stale generation without retrying terrain sampling.
+        return # Discard candidates belonging to an obsolete streamed region.
+    if not await scheduler.checkpoint(self):
+        _building.erase(cell) # Release the in-flight guard during teardown.
+        return # Avoid installing an invalid owner.
     var chunk = Node3D.new()
     chunk.name = "GroundFloraChunk_%d_%d"%[cell.x,cell.y]
     chunk.position = _get_chunk_local_position(cell)
     add_child(chunk)
     for species in range(SPECIES_NAMES.size()):
-        if not await scheduler.checkpoint(self): chunk.queue_free(); return
-        _add_batch(chunk,species,batches[species][0],batches[species][1])
-    _chunks[cell] = chunk
+        if not await scheduler.operation_checkpoint(self): # Separate initial batch allocations across rendered frames.
+            chunk.queue_free() # Release incomplete visual installation.
+            _building.erase(cell) # Allow stale generation to unwind.
+            return # Stop during teardown.
+        if not _desired_chunks.has(cell): # Reject travel while batch installation is waiting.
+            chunk.queue_free() # Release obsolete partial visuals.
+            _building.erase(cell) # Release the retained generation guard.
+            return # Avoid publishing stale flora.
+        var started: int = Time.get_ticks_usec() # Measure the indivisible batch allocation.
+        var batch: RoadFilteredFloraBatch = _add_batch(chunk, species, batches[species][0], batches[species][1], batches[species][2], origin, false) # Retain candidates without unbudgeted road queries.
+        scheduler.record_operation(started) # Include allocation in shared operation diagnostics.
+        if batch != null and not await _refresh_flora_batch(batch, Rect2(origin, Vector2.ONE * TerrainConfiguration.CHUNK_SIZE), scheduler, cell): # Budget filtering before rendering the initial batch.
+            chunk.queue_free() # Release incomplete membership results.
+            _building.erase(cell) # Release the generation guard.
+            return # Stop invalid installation.
+    _chunks[cell] = chunk # Publish the complete road-filtered chunk.
+    _building.erase(cell) # Release the guard only after all asynchronous uploads finish.
 
-func _on_paths_ready(cell: Vector2i):
-    for z in range(-1,2):
-        for x in range(-1,2):
-            var affected := cell+Vector2i(x,z)
-            if _building.has(affected): _path_dirty[affected] = true; continue
-            if not _chunks.has(affected): continue
-            _chunks[affected].queue_free()
-            _chunks.erase(affected)
-            if _desired_chunks.has(affected): _pending_chunks.append(affected)
+func _on_paths_ready(cell: Vector2i) -> void: # Queue road filtering while retaining complete sampled flora chunks.
+    var area: Rect2 = Rect2(Vector2(cell) * WorldPathNetwork.CHUNK_SIZE, Vector2.ONE * WorldPathNetwork.CHUNK_SIZE).grow(32) # Include the published road's neighboring shoulders.
+    for z: int in range(-1, 2): # Visit neighboring candidate ownership regions.
+        for x: int in range(-1, 2): # Include road shoulders crossing chunk borders.
+            var affected: Vector2i = cell + Vector2i(x, z) # Resolve the affected flora coordinate.
+            if not _chunks.has(affected) and not _building.has(affected): continue # New chunks filter current roads during initial installation.
+            _path_dirty[affected] = _path_dirty[affected].merge(area) if _path_dirty.has(affected) else area # Combine repeated notifications without destroying scenery.
+
+func _road_suppression(position: Vector2) -> float: # Supply the shared road query to retained batches.
+    return TerrainPathSampler.get_grass_suppression(position, _terrain) # Read only completed road geometry.
+
+func _refresh_dirty_paths() -> void: # Start one cooperative retained-flora update at a time.
+    if _path_refreshing or _path_dirty.is_empty(): return # Coalesce work while an existing refresh is yielding.
+    _path_refreshing = true # Reserve the consumer before any asynchronous work starts.
+    _refresh_paths_incremental(GenerationScheduler.instance) # Budget candidate checks and changed uploads independently of generation.
+
+func _refresh_paths_incremental(scheduler: GenerationScheduler) -> void: # Consume coalesced road regions without regenerating noise or terrain data.
+    for cell: Vector2i in _path_dirty.keys(): # Snapshot queued coordinates while later notifications remain coalesced.
+        if _building.has(cell): continue # Let initial installation complete before revisiting its retained candidates.
+        var area: Rect2 = _path_dirty[cell] # Capture this coordinate's current dirty neighborhood.
+        _path_dirty.erase(cell) # Preserve any new notification arriving during yields as a separate pending update.
+        if not _chunks.has(cell): continue # Ignore unloaded chunks safely.
+        var chunk: Node3D = _chunks[cell] # Retain the identity rather than performing another dictionary lookup after travel.
+        for child: Node in chunk.get_children(): # Visit existing per-species render batches.
+            if child is RoadFilteredFloraBatch: # Restrict updates to the retained-candidate component.
+                if not await _refresh_flora_batch(child as RoadFilteredFloraBatch, area, scheduler): break # Stop when travel or teardown removes the batch.
+    _path_refreshing = false # Allow later coalesced notifications to start another update.
+
+func _refresh_flora_batch(batch: RoadFilteredFloraBatch, area: Rect2, scheduler: GenerationScheduler, required_cell: Vector2i = INVALID_CHUNK) -> bool: # Spread road queries across scheduler slices and upload only changed membership.
+    for index: int in range(batch.candidate_count()): # Check retained candidate positions without procedural sampling.
+        if scheduler != null and not await scheduler.checkpoint(self): return false # Respect shared generation budget and pause state.
+        if not is_instance_valid(batch) or batch.is_queued_for_deletion() or not batch.is_inside_tree() or batch.get_parent().is_queued_for_deletion(): return false # Cancel updates belonging to removed chunks.
+        if required_cell != INVALID_CHUNK and not _desired_chunks.has(required_cell): return false # Cancel in-flight initial filtering immediately after travel.
+        batch.refresh_candidate(index, area, _road_suppression) # Skip queries outside the dirty road neighborhood.
+    if not batch.needs_upload(): return true # Avoid unchanged rendering-server work.
+    if scheduler != null and not await scheduler.operation_checkpoint(self): return false # Share expensive upload admission with terrain and decoration LOD work.
+    if not is_instance_valid(batch) or batch.is_queued_for_deletion() or not batch.is_inside_tree() or batch.get_parent().is_queued_for_deletion(): return false # Recheck validity after upload admission yields.
+    if required_cell != INVALID_CHUNK and not _desired_chunks.has(required_cell): return false # Reject obsolete initial uploads after admission yields.
+    var started: int = Time.get_ticks_usec() # Measure the compacted upload's indivisible cost.
+    batch.apply_visibility() # Update the existing node and MultiMesh without regenerating flora.
+    if scheduler != null: scheduler.record_operation(started) # Retain worst-operation diagnostics.
+    return true # Confirm complete filtering and installation.

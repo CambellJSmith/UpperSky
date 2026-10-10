@@ -56,9 +56,9 @@ func run():
     assert(chunk.get_shape_owners().size() == 32)
     for lod in range(3):
         chunk.set_lod_level(lod)
-        assert(chunk._visual_nodes.size() == 16)
+        assert(chunk.get_child_count() == 16) # Retained tree nodes remain stable across all authored detail tiers.
         assert(chunk.get_shape_owners().size() == 32)
-        for node in chunk._visual_nodes:
+        for node in chunk.get_children(): # Inspect retained rendering children rather than removed private batch tracking.
             var mm: MultiMesh = node.multimesh
             var expected = placements[int(str(node.name).split("_")[1])].transform*mm.mesh.get_aabb()
             assert(mm.custom_aabb.grow(.001).encloses(expected))

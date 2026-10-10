@@ -23,6 +23,11 @@ const BOULDER_PATH_CLEAR_THRESHOLD: float = 0.78 # Removes blocking rocks from t
 const OCCUPANCY_CELL_SIZE: float = 8.0 # Spatially indexes accepted placements so overlap checks avoid scanning the complete chunk.
 const HASH_MAXIMUM: float = 2147483647.0 # Converts the positive hash range into a zero-to-one value.
 
+var _defer_path_filter: bool = false # Lets streamers retain stable terrain-valid candidates before road visibility filtering.
+
+func defer_path_filtering() -> void: # Separates road publication from expensive procedural placement.
+    _defer_path_filter = true # Leave road membership to the retained chunk component.
+
 var _settlement_sampler: SettlementSampler
 var _camp_sampler: CampSampler
 
@@ -69,7 +74,7 @@ func _append_tree_placements(chunk_origin: Vector2, placements: Array[WorldDecor
                 continue
             if not _is_inside_chunk(candidate, chunk_origin) or _is_excluded(candidate,8.0): # Rejects neighbouring ownership and the protected spawn clearing before expensive world sampling.
                 continue # Leaves this candidate to its owning chunk or the protected clear area.
-            if TerrainPathSampler.get_grass_suppression(candidate,_terrain) > TREE_PATH_CLEAR_THRESHOLD: # Detects trees whose trunk or canopy would intrude into a travelled corridor.
+            if not _defer_path_filter and TerrainPathSampler.get_grass_suppression(candidate,_terrain) > TREE_PATH_CLEAR_THRESHOLD: # Detects trees whose trunk or canopy would intrude into a travelled corridor.
                 continue # Keeps the complete worn path and its immediate shoulder visually open.
             var broad_density: float = _sample_normalized(_forest_density_noise, candidate) # Reads the kilometre-scale forest mask.
             var breakup_density: float = _sample_normalized(_forest_breakup_noise, candidate) # Reads local clearing variation.
@@ -109,7 +114,7 @@ func _append_boulder_placements(chunk_origin: Vector2, variant_count: int, place
             var candidate: Vector2 = _get_jittered_candidate(cell_x, cell_z, BOULDER_CELL_SIZE, BOULDER_JITTER_FRACTION, 101) # Generates one stable rock position inside the cell.
             if not _is_inside_chunk(candidate, chunk_origin) or _is_excluded(candidate): # Rejects neighbouring ownership and the protected spawn clearing before expensive sampling.
                 continue # Leaves the candidate empty or owned by its correct chunk.
-            if TerrainPathSampler.get_grass_suppression(candidate,_terrain) > BOULDER_PATH_CLEAR_THRESHOLD: # Detects rocks that would block the clearly travelled path centre.
+            if not _defer_path_filter and TerrainPathSampler.get_grass_suppression(candidate,_terrain) > BOULDER_PATH_CLEAR_THRESHOLD: # Detects rocks that would block the clearly travelled path centre.
                 continue # Preserves an unobstructed route while still allowing natural stones near its margins.
             var rocky_density: float = _sample_normalized(_boulder_density_noise, candidate) # Reads the broad rocky-region mask.
             var field_weight: float = smoothstep(0.34, 0.74, rocky_density) # Expands coherent boulder fields substantially.
@@ -242,7 +247,7 @@ func _append_tree_incremental(chunk_origin: Vector2, placements: Array[WorldDeco
                 continue
             if not _is_inside_chunk(candidate, chunk_origin) or _is_excluded(candidate,8.0): # Rejects neighbouring ownership and the protected spawn clearing before expensive world sampling.
                 continue # Leaves this candidate to its owning chunk or the protected clear area.
-            if TerrainPathSampler.get_grass_suppression(candidate,_terrain) > TREE_PATH_CLEAR_THRESHOLD: # Detects trees whose trunk or canopy would intrude into a travelled corridor.
+            if not _defer_path_filter and TerrainPathSampler.get_grass_suppression(candidate,_terrain) > TREE_PATH_CLEAR_THRESHOLD: # Detects trees whose trunk or canopy would intrude into a travelled corridor.
                 continue # Keeps the complete worn path and its immediate shoulder visually open.
             var broad_density: float = _sample_normalized(_forest_density_noise, candidate) # Reads the kilometre-scale forest mask.
             var breakup_density: float = _sample_normalized(_forest_breakup_noise, candidate) # Reads local clearing variation.
@@ -284,7 +289,7 @@ func _append_boulder_incremental(chunk_origin: Vector2, variant_count: int, plac
             var candidate: Vector2 = _get_jittered_candidate(cell_x, cell_z, BOULDER_CELL_SIZE, BOULDER_JITTER_FRACTION, 101) # Generates one stable rock position inside the cell.
             if not _is_inside_chunk(candidate, chunk_origin) or _is_excluded(candidate): # Rejects neighbouring ownership and the protected spawn clearing before expensive sampling.
                 continue # Leaves the candidate empty or owned by its correct chunk.
-            if TerrainPathSampler.get_grass_suppression(candidate,_terrain) > BOULDER_PATH_CLEAR_THRESHOLD: # Detects rocks that would block the clearly travelled path centre.
+            if not _defer_path_filter and TerrainPathSampler.get_grass_suppression(candidate,_terrain) > BOULDER_PATH_CLEAR_THRESHOLD: # Detects rocks that would block the clearly travelled path centre.
                 continue # Preserves an unobstructed route while still allowing natural stones near its margins.
             var rocky_density: float = _sample_normalized(_boulder_density_noise, candidate) # Reads the broad rocky-region mask.
             var field_weight: float = smoothstep(0.34, 0.74, rocky_density) # Expands coherent boulder fields substantially.

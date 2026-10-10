@@ -24,10 +24,12 @@ var _pending_chunks: Array[Vector2i] = [] # Holds missing chunks in near-to-far 
 var _pending_chunk_index: int = 0 # Tracks the next queued coordinate without repeatedly shifting the array.
 var _pending_lod_updates: Array[Vector2i] = [] # Holds retained chunks that crossed a visual detail boundary.
 var _pending_lod_index: int = 0 # Tracks the next LOD update without shifting the queue.
+var _lod_updating: bool = false # Prevents overlapping LOD consumers while operation admission yields.
 var _last_origin_local_position: Vector2 = Vector2(INF, INF) # Detects floating-origin changes so loaded decoration chunks remain aligned.
 var _state_refresh_elapsed: float = 0.0 # Accumulates time between inexpensive stream-state checks.
 var _initializing = false
-var _path_dirty := {}
+var _path_dirty: Dictionary[Vector2i, Rect2] = {} # Coalesces road neighborhoods awaiting retained-candidate filtering.
+var _path_refreshing: bool = false # Prevents overlapping road-update consumers.
 var _initialized: bool = false # Tracks whether the terrain-backed initial decoration neighbourhood has been created.
 
 func _ready() -> void: # Resolves game-scene dependencies while waiting for shoreline spawn initialization to finish.
@@ -47,6 +49,7 @@ func initialize(terrain: InfiniteTerrain, player: Node3D, spawn_world_position: 
     _player = player # Stores the subject that controls streaming distance and collision.
     _mesh_library = library if library != null else WorldDecorationMeshLibrary.new() # Builds every shared smooth LOD and collision resource once.
     _sampler = WorldDecorationSampler.new(_terrain) # Creates deterministic dense scatter fields using the established terrain world seed.
+    _sampler.defer_path_filtering() # Retain stable candidates while roads update their visible membership.
     _sampler.set_exclusion_area(spawn_world_position, SPAWN_EXCLUSION_RADIUS) # Protects the immediate player start from generated obstacles.
     _current_chunk_coordinate = _get_chunk_coordinate(_get_player_world_position()) # Calculates the initial absolute decoration chunk coordinate.
     _refresh_streaming_set(_current_chunk_coordinate) # Builds desired and queued chunk coordinates around the player.
@@ -80,6 +83,7 @@ func _profile__process(delta: float) -> void: # Advances bounded dense streaming
             _refresh_streaming_set(_current_chunk_coordinate) # Rebuilds desired, queued, unloaded, LOD, and collision states.
     _build_pending_chunks() # Generates at most one missing dense object chunk this frame.
     _apply_pending_lod_updates() # Rebuilds only a few retained-chunk LOD buffers per frame to avoid boundary spikes.
+    _refresh_dirty_paths() # Apply road masks to retained placements without rebuilding complete chunks.
 
 func _try_initialize_from_game_scene() -> void: # Detects completion of the existing deferred terrain and player spawn sequence.
     if _initializing: return
@@ -170,7 +174,7 @@ func _profile__build_chunk(chunk_coordinate: Vector2i) -> void: # Generates one 
     chunk.position = _get_chunk_local_position(chunk_coordinate) # Places chunk-local transforms relative to the current floating origin.
     add_child(chunk) # Adds the chunk beneath the dedicated decoration streamer.
     var chunk_distance: int = _get_chunk_distance(chunk_coordinate) # Measures the new chunk against the active player-centred grid.
-    chunk.configure(placements, _mesh_library, _get_lod_level(chunk_distance)) # Creates draw-batched visuals against the appropriate shared distance mesh.
+    chunk.configure(placements, _mesh_library, _get_lod_level(chunk_distance), Vector2(chunk_coordinate) * TerrainConfiguration.CHUNK_SIZE, _road_suppression) # Creates draw-batched visuals against the appropriate shared distance mesh.
     _chunks[chunk_coordinate] = chunk # Registers the chunk for streaming, collision, LOD, and rebase alignment.
     chunk.set_collision_active(chunk_distance <= COLLISION_RADIUS) # Enables physical objects only in the reduced near-player region.
 
@@ -224,7 +228,7 @@ func _queue_lod_updates() -> void: # Queues retained chunks for bounded visual d
                 if maxi(absi(offset_x), absi(offset_z)) != ring: # Skips coordinates inside the current perimeter.
                     continue # Continues until reaching the active ring edge.
                 var chunk_coordinate: Vector2i = _current_chunk_coordinate + Vector2i(offset_x, offset_z) # Converts the ring offset into absolute chunk space.
-                if _chunks.has(chunk_coordinate): # Detects a retained chunk requiring a tier check.
+                if _chunks.has(chunk_coordinate) and _chunks[chunk_coordinate].get_lod_level() != _get_lod_level(ring): # Queue only retained chunks that actually need a tier change.
                     _pending_lod_updates.append(chunk_coordinate) # Queues near-to-far work without rebuilding unchanged tiers immediately.
 
 func _apply_pending_lod_updates() -> void:
@@ -236,17 +240,29 @@ func _apply_pending_lod_updates() -> void:
     _profile__apply_pending_lod_updates()
     RuntimeProfiler.end(_profile_token)
 
-func _profile__apply_pending_lod_updates() -> void: # Applies only a few retained-chunk LOD changes during the current rendered frame.
-    var updates_applied: int = 0 # Tracks work against the per-frame LOD rebuild budget.
-    while updates_applied < LOD_UPDATES_PER_FRAME and _pending_lod_index < _pending_lod_updates.size():
-        if GenerationScheduler.instance != null and Time.get_ticks_usec() >= GenerationScheduler.instance._deadline: return # Continues while budget and queued work remain.
-        var chunk_coordinate: Vector2i = _pending_lod_updates[_pending_lod_index] # Retrieves the next retained coordinate without shifting the queue.
-        _pending_lod_index += 1 # Advances sequentially to the next item.
-        if not _chunks.has(chunk_coordinate): # Detects a chunk unloaded after the queue was built.
-            continue # Skips stale work safely.
-        var chunk: WorldDecorationChunk = _chunks[chunk_coordinate] # Retrieves the retained object chunk.
-        chunk.set_lod_level(_get_lod_level(_get_chunk_distance(chunk_coordinate))) # Rebuilds buffers only if this chunk actually crossed an LOD tier.
-        updates_applied += 1 # Consumes one bounded update slot even when the chunk was already on the correct tier.
+func _profile__apply_pending_lod_updates() -> void: # Starts one bounded LOD consumer without admitting concurrent frame work.
+    if _lod_updating or _pending_lod_index >= _pending_lod_updates.size(): return # Skip unchanged or already running LOD work.
+    _lod_updating = true # Reserve the consumer before any scheduler yield.
+    _apply_lod_updates_incremental(GenerationScheduler.instance) # Admit changed chunks through the shared engine-operation budget.
+
+func _apply_lod_updates_incremental(scheduler: GenerationScheduler) -> void: # Updates actual changed tiers with stale-travel checks after admission.
+    var updates_applied: int = 0 # Bound work when the synchronous fallback has no scheduler.
+    while updates_applied < LOD_UPDATES_PER_FRAME and _pending_lod_index < _pending_lod_updates.size(): # Visit only pending actual changes.
+        var cell: Vector2i = _pending_lod_updates[_pending_lod_index] # Capture a requested retained coordinate.
+        _pending_lod_index += 1 # Consume the queue slot before yielding to other world work.
+        if not _chunks.has(cell): continue # Ignore chunks unloaded after queue construction.
+        var chunk: WorldDecorationChunk = _chunks[cell] # Retain the exact node identity across scheduler waits.
+        var lod: int = _get_lod_level(_get_chunk_distance(cell)) # Resolve the current desired distance tier.
+        if chunk.get_lod_level() == lod: continue # Avoid consuming operation admission for unchanged tiers.
+        if scheduler != null and not await scheduler.operation_checkpoint(self): break # Separate changed chunks from every other costly generation operation.
+        if not is_instance_valid(chunk) or chunk.is_queued_for_deletion() or not _chunks.has(cell) or _chunks[cell] != chunk: continue # Discard obsolete node identities after travel.
+        lod = _get_lod_level(_get_chunk_distance(cell)) # Recompute desired detail after movement during admission.
+        if chunk.get_lod_level() == lod: continue # Avoid updating a tier that became unnecessary while waiting.
+        var started: int = Time.get_ticks_usec() # Measure first-visit buffers and subsequent mesh swaps alike.
+        chunk.set_lod_level(lod) # Reuse persistent tree buffers and lazy cached rock batches.
+        if scheduler != null: scheduler.record_operation(started) # Expose the remaining indivisible engine-operation cost.
+        updates_applied += 1 # Count actual changed chunks rather than no-op queue entries.
+    _lod_updating = false # Let the next frame consume remaining or newly queued changes.
 
 func _build_incremental(cell: Vector2i, scheduler: GenerationScheduler):
     scheduler.active_owner = self
@@ -259,31 +275,66 @@ func _build_incremental(cell: Vector2i, scheduler: GenerationScheduler):
         for x in range(shrine_first.x,shrine_last.x+1):
             await WayshrineSampler.for_terrain(_terrain).sample_cell_incremental(Vector2i(x,z),scheduler)
     var placements = await _sampler.sample_chunk_incremental(cell,_mesh_library.get_boulder_variant_count(),scheduler)
-    _building.erase(cell)
-    if _path_dirty.has(cell):
-        _path_dirty.erase(cell)
-        if _desired_chunks.has(cell): _pending_chunks.append(cell)
-        return
-    if not is_inside_tree() or not _desired_chunks.has(cell) or _chunks.has(cell): return
-    if not await scheduler.checkpoint(self): return
+    if not is_inside_tree() or not _desired_chunks.has(cell) or _chunks.has(cell):
+        _building.erase(cell) # Release stale generation without restarting sampling.
+        return # Discard placements outside the desired streaming area.
+    if not await scheduler.operation_checkpoint(self):
+        _building.erase(cell) # Release the generation guard during shutdown.
+        return # Reject invalid engine installation.
+    if not _desired_chunks.has(cell) or _chunks.has(cell):
+        _building.erase(cell) # Release generation after travel while admission was waiting.
+        return # Avoid publishing stale scenery.
+    var started: int = Time.get_ticks_usec() # Measure the admitted initial batch and collider installation.
     var chunk = WorldDecorationChunk.new()
     chunk.name = "DecorationChunk_%d_%d"%[cell.x,cell.y]
     chunk.position = _get_chunk_local_position(cell)
     add_child(chunk)
     var distance = _get_chunk_distance(cell)
-    chunk.configure(placements,_mesh_library,_get_lod_level(distance))
+    chunk.configure(placements,_mesh_library,_get_lod_level(distance),origin_point,_road_suppression) # Filter current roads without repeating procedural generation.
     _chunks[cell] = chunk
     chunk.set_collision_active(distance <= COLLISION_RADIUS)
+    scheduler.record_operation(started) # Include initial scenery installation in shared engine-operation diagnostics.
+    _building.erase(cell) # Release the guard only after complete installation.
 
-func _on_paths_ready(cell: Vector2i):
-    for z in range(-1,2):
-        for x in range(-1,2):
-            var affected := cell+Vector2i(x,z)
-            if _building.has(affected): _path_dirty[affected] = true; continue
-            if not _chunks.has(affected): continue
-            _chunks[affected].queue_free()
-            _chunks.erase(affected)
-            if _desired_chunks.has(affected): _pending_chunks.append(affected)
+func _on_paths_ready(cell: Vector2i) -> void: # Queue retained-candidate filtering without destroying scenery chunks.
+    var area: Rect2 = Rect2(Vector2(cell) * WorldPathNetwork.CHUNK_SIZE, Vector2.ONE * WorldPathNetwork.CHUNK_SIZE).grow(32) # Include adjacent road shoulders.
+    for z: int in range(-1, 2): # Visit neighboring candidate ownership regions.
+        for x: int in range(-1, 2): # Include road shoulders crossing chunk edges.
+            var affected: Vector2i = cell + Vector2i(x, z) # Resolve the affected decoration coordinate.
+            if not _chunks.has(affected) and not _building.has(affected): continue # New chunks filter current roads during initial installation.
+            _path_dirty[affected] = _path_dirty[affected].merge(area) if _path_dirty.has(affected) else area # Coalesce repeated notifications into one pending neighborhood.
+
+func _road_suppression(position: Vector2) -> float: # Supplies the authoritative completed-road mask to retained placements.
+    return TerrainPathSampler.get_grass_suppression(position, _terrain) # Keep decoration and ground-cover clearances aligned.
+
+func _refresh_dirty_paths() -> void: # Start one cooperative road-filtering consumer at a time.
+    if _path_refreshing or _path_dirty.is_empty(): return # Preserve coalescing while the previous consumer yields.
+    _path_refreshing = true # Reserve the consumer before starting asynchronous work.
+    _refresh_paths_incremental(GenerationScheduler.instance) # Update retained candidates within shared generation slices.
+
+func _refresh_paths_incremental(scheduler: GenerationScheduler) -> void: # Filter only notified road neighborhoods without terrain or density resampling.
+    for cell: Vector2i in _path_dirty.keys(): # Snapshot pending coordinates while later notifications remain queued.
+        if _building.has(cell): continue # Let initial installation establish current road membership first.
+        var area: Rect2 = _path_dirty[cell] # Capture this coordinate's coalesced dirty region.
+        _path_dirty.erase(cell) # Preserve notifications arriving during yields as subsequent work.
+        if not _chunks.has(cell): continue # Ignore unloaded coordinates.
+        var chunk: WorldDecorationChunk = _chunks[cell] # Preserve chunk identity across scheduler waits.
+        var valid: bool = true # Track whether candidate work survives travel and teardown.
+        for index: int in range(chunk.candidate_count()): # Visit immutable candidate positions without procedural sampling.
+            if scheduler != null and not await scheduler.checkpoint(self): # Respect pause state and the shared CPU budget.
+                valid = false # Stop processing an invalid scheduler owner.
+                break # Unwind this coordinate's update.
+            if not is_instance_valid(chunk) or chunk.is_queued_for_deletion() or not chunk.is_inside_tree(): # Reject chunks unloaded during a yield.
+                valid = false # Avoid stale instance work.
+                break # Stop this candidate pass.
+            chunk.refresh_path_candidate(index, area, _road_suppression) # Query only candidates in the affected neighborhood.
+        if not valid or not chunk.paths_need_commit(): continue # Avoid invalid or unchanged rendering operations.
+        if scheduler != null and not await scheduler.operation_checkpoint(self): break # Share changed-batch admission with terrain and LOD installation.
+        if not is_instance_valid(chunk) or chunk.is_queued_for_deletion() or not chunk.is_inside_tree(): continue # Recheck identity after admission yields.
+        var started: int = Time.get_ticks_usec() # Measure the indivisible visible and physical membership update.
+        chunk.commit_path_visibility() # Preserve the chunk and unaffected physical owners.
+        if scheduler != null: scheduler.record_operation(started) # Expose upload and collider update cost.
+    _path_refreshing = false # Allow later coalesced notifications to start a new pass.
 
 func _initialize_incremental(spawn: Vector2, scheduler: GenerationScheduler):
     scheduler.active_owner = self
