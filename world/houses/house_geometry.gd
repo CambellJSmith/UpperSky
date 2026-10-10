@@ -10,6 +10,14 @@ var _root: Node3D
 var _body: StaticBody3D
 var _parameters: Dictionary
 const FOUNDATION: float = .45
+const BRICK_COURSE_HEIGHT: float = .32 # Keep masonry readable with fewer brick courses.
+const STONE_COURSE_HEIGHT: float = .52 # Reduce small stone courses on building walls.
+const BRICK_BLOCK_WIDTH: float = .70 # Use broader bricks for simpler wall relief.
+const STONE_BLOCK_WIDTH: float = 1.05 # Use broader stone blocks for simpler wall relief.
+const PLANK_WIDTH: float = .56 # Reduce narrow wooden siding strips.
+const SLATE_ROW_SPACING: float = .70 # Reduce small slate courses on pitched roofs.
+const SLATE_COLUMN_SPACING: float = .75 # Use broader slate pieces.
+const THATCH_COLUMN_SPACING: float = .50 # Reduce fine thatch bundles while retaining raised folds.
 
 func build(recipe: HouseRecipe, collisions: bool = true) -> Node3D:
     _body = null
@@ -156,11 +164,11 @@ func _module(origin: Vector3, w: float, d: float, floors: int, wall: int, hip: b
         _gables(origin+Vector3(0,height,0),roof_w,roof_d,rise)
 
 func _wall_face(origin: Vector3, basis: Basis, length: float, height: float, style: int, level: int, entrance: bool):
-    var courses: int = ceili(height / (.25 if style == HouseRecipe.WallStyle.BRICK else .42))
+    var courses: int = ceili(height / (BRICK_COURSE_HEIGHT if style == HouseRecipe.WallStyle.BRICK else STONE_COURSE_HEIGHT)) # Share simpler masonry spacing across build paths.
     if style in [HouseRecipe.WallStyle.STONE,HouseRecipe.WallStyle.BRICK]:
         var brick: bool = style == HouseRecipe.WallStyle.BRICK
         var course_h: float = height/courses
-        var block_w: float = .56 if brick else .84
+        var block_w: float = BRICK_BLOCK_WIDTH if brick else STONE_BLOCK_WIDTH # Keep fewer, broader masonry blocks.
         for row in range(courses):
             var left: float = -length*.5
             var first: bool = true
@@ -172,7 +180,7 @@ func _wall_face(origin: Vector3, basis: Basis, length: float, height: float, sty
                 left += width
                 first = false
     elif style == HouseRecipe.WallStyle.WOOD:
-        var count: int = ceili(length/.44)
+        var count: int = ceili(length / PLANK_WIDTH) # Keep fewer, broader siding planks.
         var width: float = length/count
         for i in range(count):
             _box("plank%d"%_rng.randi_range(0,4),origin+basis*Vector3(-length*.5+(i+.5)*width,height*.5,-.028),Vector3(width-.025,height-.04,.065),basis)
@@ -244,8 +252,8 @@ func _roof(origin: Vector3, w: float, d: float, rise: float, hip: bool):
         var normal = Vector3(side*rise,w*.5+.38,0).normalized()
         _quad(key_prefix+"0",a,b,c,dd,normal)
         _quad("timber",a-Vector3(0,thickness,0),dd-Vector3(0,thickness,0),c-Vector3(0,thickness,0),b-Vector3(0,thickness,0),Vector3.DOWN)
-        var rows: int = 4 if thatch else ceili(Vector2(w*.5+.38,rise).length()/.55)
-        var columns: int = ceili((d+.76)/(.35 if thatch else .60))
+        var rows: int = 4 if thatch else ceili(Vector2(w*.5+.38,rise).length() / SLATE_ROW_SPACING) # Simplify slate density while retaining thatch layering.
+        var columns: int = ceili((d+.76) / (THATCH_COLUMN_SPACING if thatch else SLATE_COLUMN_SPACING)) # Use fewer roof pieces without changing the roof profile.
         for row in range(rows):
             var t0: float = float(row)/rows
             var t1: float = minf(1.0,float(row+1)/rows+.015)
@@ -306,14 +314,14 @@ func _hip_ends(origin: Vector3, w: float, d: float, rise: float, thickness: floa
     var half_w: float = w*.5+.38
     var half_d: float = d*.5+.38
     var run: float = minf(half_w*.85,half_d*.65)
-    var rows: int = 5 if prefix == "thatch" else ceili(Vector2(run,rise).length()/.55)
+    var rows: int = 5 if prefix == "thatch" else ceili(Vector2(run,rise).length() / SLATE_ROW_SPACING) # Match hip-end slate courses to the main roof.
     for end in [-1.0,1.0]:
         var normal = Vector3(0,run,end*rise).normalized()
         _triangle(prefix+"0",origin+Vector3(-half_w,0,end*half_d),origin+Vector3(half_w,0,end*half_d),origin+Vector3(0,rise,end*(half_d-run)),normal)
         for row in range(rows):
             var t0: float = float(row)/rows
             var t1: float = float(row+1)/rows
-            var count: int = maxi(1,ceili(w*(1.0-t0)/.55))
+            var count: int = maxi(1,ceili(w*(1.0-t0) / (THATCH_COLUMN_SPACING if prefix == "thatch" else SLATE_COLUMN_SPACING))) # Simplify hip-end pieces consistently with the main roof.
             for i in range(count):
                 var x0: float = -1.0+2.0*i/count
                 var x1: float = -1.0+2.0*(i+1)/count
@@ -364,7 +372,7 @@ func _chimney(w: float, d: float, floors: int):
     var width: float = _rng.randf_range(.65,.88)
     var depth: float = width*.85
     _box("brick_mortar",centre+Vector3(0,(top+bottom)*.5,0),Vector3(width,top-bottom,depth))
-    var courses: int = ceili((top-bottom)/.25)
+    var courses: int = ceili((top-bottom) / BRICK_COURSE_HEIGHT) # Match chimney masonry to the simpler wall courses.
     for row in range(courses):
         var y: float = bottom+(row+.5)*(top-bottom)/courses
         for side in range(4):
@@ -412,11 +420,11 @@ func _round_beam(key: String, start: Vector3, end: Vector3, radius: float):
         _triangle(key,end,end+offset_a,end+offset_b,direction)
 
 func _wall_face_incremental(origin: Vector3, basis: Basis, length: float, height: float, style: int, level: int, entrance: bool, scheduler: GenerationScheduler):
-    var courses: int = ceili(height / (.25 if style == HouseRecipe.WallStyle.BRICK else .42))
+    var courses: int = ceili(height / (BRICK_COURSE_HEIGHT if style == HouseRecipe.WallStyle.BRICK else STONE_COURSE_HEIGHT)) # Share simpler masonry spacing across build paths.
     if style in [HouseRecipe.WallStyle.STONE,HouseRecipe.WallStyle.BRICK]:
         var brick: bool = style == HouseRecipe.WallStyle.BRICK
         var course_h: float = height/courses
-        var block_w: float = .56 if brick else .84
+        var block_w: float = BRICK_BLOCK_WIDTH if brick else STONE_BLOCK_WIDTH # Keep fewer, broader masonry blocks.
         for row in range(courses):
             if not await scheduler.checkpoint(): return
             var left: float = -length*.5
@@ -430,7 +438,7 @@ func _wall_face_incremental(origin: Vector3, basis: Basis, length: float, height
                 left += width
                 first = false
     elif style == HouseRecipe.WallStyle.WOOD:
-        var count: int = ceili(length/.44)
+        var count: int = ceili(length / PLANK_WIDTH) # Keep fewer, broader siding planks.
         var width: float = length/count
         for i in range(count):
             if not await scheduler.checkpoint(): return
@@ -468,7 +476,7 @@ func _hip_ends_incremental(origin: Vector3, w: float, d: float, rise: float, thi
     var half_w: float = w*.5+.38
     var half_d: float = d*.5+.38
     var run: float = minf(half_w*.85,half_d*.65)
-    var rows: int = 5 if prefix == "thatch" else ceili(Vector2(run,rise).length()/.55)
+    var rows: int = 5 if prefix == "thatch" else ceili(Vector2(run,rise).length() / SLATE_ROW_SPACING) # Match hip-end slate courses to the main roof.
     for end in [-1.0,1.0]:
         if not await scheduler.checkpoint(): return
         var normal = Vector3(0,run,end*rise).normalized()
@@ -477,7 +485,7 @@ func _hip_ends_incremental(origin: Vector3, w: float, d: float, rise: float, thi
             if not await scheduler.checkpoint(): return
             var t0: float = float(row)/rows
             var t1: float = float(row+1)/rows
-            var count: int = maxi(1,ceili(w*(1.0-t0)/.55))
+            var count: int = maxi(1,ceili(w*(1.0-t0) / (THATCH_COLUMN_SPACING if prefix == "thatch" else SLATE_COLUMN_SPACING))) # Simplify hip-end pieces consistently with the main roof.
             for i in range(count):
                 if not await scheduler.checkpoint(): return
                 var x0: float = -1.0+2.0*i/count
@@ -532,7 +540,7 @@ func _chimney_incremental(w: float, d: float, floors: int, scheduler: Generation
     var width: float = _rng.randf_range(.65,.88)
     var depth: float = width*.85
     _box("brick_mortar",centre+Vector3(0,(top+bottom)*.5,0),Vector3(width,top-bottom,depth))
-    var courses: int = ceili((top-bottom)/.25)
+    var courses: int = ceili((top-bottom) / BRICK_COURSE_HEIGHT) # Match chimney masonry to the simpler wall courses.
     for row in range(courses):
         if not await scheduler.checkpoint(): return
         var y: float = bottom+(row+.5)*(top-bottom)/courses
@@ -585,8 +593,8 @@ func _roof_incremental(origin: Vector3, w: float, d: float, rise: float, hip: bo
         var normal = Vector3(side*rise,w*.5+.38,0).normalized()
         _quad(key_prefix+"0",a,b,c,dd,normal)
         _quad("timber",a-Vector3(0,thickness,0),dd-Vector3(0,thickness,0),c-Vector3(0,thickness,0),b-Vector3(0,thickness,0),Vector3.DOWN)
-        var rows: int = 4 if thatch else ceili(Vector2(w*.5+.38,rise).length()/.55)
-        var columns: int = ceili((d+.76)/(.35 if thatch else .60))
+        var rows: int = 4 if thatch else ceili(Vector2(w*.5+.38,rise).length() / SLATE_ROW_SPACING) # Simplify slate density while retaining thatch layering.
+        var columns: int = ceili((d+.76) / (THATCH_COLUMN_SPACING if thatch else SLATE_COLUMN_SPACING)) # Use fewer roof pieces without changing the roof profile.
         for row in range(rows):
             if not await scheduler.checkpoint(): return
             var t0: float = float(row)/rows
