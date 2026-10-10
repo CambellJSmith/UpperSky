@@ -24,6 +24,9 @@ func run():
                 break # Stop the current row after finding the fixture.
         if not town.is_empty(): break # Stop once a town is available.
     assert(not town.is_empty(), "No ordinary town fixture found") # Require an exterior population to exercise.
+    var town_cell: Vector2i = Vector2i((town.position / SettlementSampler.TOWN_CELL_SIZE).floor()) # Identify the selected resident fixture.
+    if not population._settlements._towns.has(town_cell): # Isolate NPC streaming from the unrelated distant scenery backlog.
+        population._settlements._build({"kind":"town","cell":town_cell,"definition":town}) # Prepare the selected town root through the production builder.
     player.set_fly_mode_enabled(true) # Keep the fixture clear of unloaded collision.
     player.global_position = terrain.world_to_local_position(Vector3(town.position.x, town.height + 30.0, town.position.y)) # Visit the selected town directly.
     var town_deadline: int = Time.get_ticks_msec() + 20000 # Bound incremental town and resident loading.
@@ -57,6 +60,21 @@ func run():
     assert(population._elapsed == elapsed)
     game.get_node("DungeonSystem")._set_overworld_active(true)
     console._execute_command("homestead")
+    absolute = terrain.local_to_world_position(player.global_position) # Locate the requested cottage neighbourhood.
+    centre = Vector2i((Vector2(absolute.x, absolute.z) / SettlementSampler.HOMESTEAD_CELL_SIZE).floor()) # Search natural home placement cells.
+    var home: Dictionary = {} # Retain a cottage with a validated resident route.
+    for z: int in range(-2, 3): # Examine nearby cottage rows.
+        for x: int in range(-2, 3): # Find a home suitable for the population fixture.
+            var candidate: Dictionary = sampler.sample_homestead(centre + Vector2i(x, z)) # Inspect deterministic cottage placement.
+            if not candidate.is_empty() and not population._sampler.home(candidate).is_empty(): # Require an accepted yard route.
+                home = candidate # Retain the resident fixture.
+                break # Stop the current search row.
+        if not home.is_empty(): break # Stop once the cottage fixture is resolved.
+    assert(not home.is_empty(), "No resident cottage fixture found") # Require a real homesteader route.
+    var home_cell: Vector2i = Vector2i((home.position / SettlementSampler.HOMESTEAD_CELL_SIZE).floor()) # Identify the retained cottage root.
+    if not population._settlements._homes.has(home_cell): # Isolate NPC streaming from scenery generation backlog.
+        population._settlements._build({"kind":"home","cell":home_cell,"definition":home}) # Prepare the cottage through the production builder.
+    player.global_position = terrain.world_to_local_position(Vector3(home.position.x, home.height + 9.0, home.position.y)) # Visit the validated yard route.
     var home_deadline: int = Time.get_ticks_msec() + 20000 # Bound homesteader streaming after travel.
     var has_homesteader: bool = false # Observe the actual resident outcome.
     while not has_homesteader and Time.get_ticks_msec() < home_deadline: # Wait for a real streamed resident rather than a fixed frame count.
