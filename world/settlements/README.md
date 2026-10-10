@@ -61,3 +61,16 @@ Wilderness streaming pauses during city visits; the day/night clock continues. S
 Use `city` in the developer console to fly to a nearby natural city exterior. Descend to the approach and cross the drawbridge. `town` and `homestead` remain available. Run `world/settlements/tests/check_city.gd` for city geometry, safe routes, king animations, entry, exit, save files and building interior checks.
 
 The Shadow Sentinel uses the supplied rigged GLB and the shared Quaternius animation pack, baked offline for idle, walk, run, punch, kick and weapon attacks. Each city creates exactly one with a stable identity and a courtyard patrol. It starts neutral at 100 affection; inventory, health, relationships and position use the same persistent city NPC system as the king.
+
+### City batching performance
+
+City scenery now copies source vertices, inverse-transpose normals, flat colours and rebased triangle indices directly into neighbourhood buffers. Only the final ArrayMesh for each group is uploaded; generation no longer creates and uploads a temporary coloured mesh for every source surface. Existing building nodes, metadata, physics children, dynamic actors and special transparent/textured rendering remain intact. Frame checkpoints and 48-metre culling groups are retained.
+
+An isolated headless Godot 4.7.2 comparison using 52 houses from the current HouseGeometry generator measured the batching stage at 3.87 seconds before and 2.67 seconds after (about 31% less time). This measures batching, not total city loading or gameplay FPS; timings depend on hardware and recipes. A separate 4,000-box comparison retained the same triangle geometry, colours, vertex count and 36 neighbourhood batches.
+
+Run the focused buffer and hierarchy regression alongside the full city integration check:
+
+```sh
+godot --headless --path . --script res://world/settlements/tests/check_city_batch.gd
+godot --headless --path . --script res://world/settlements/tests/check_city.gd
+```
