@@ -15,6 +15,8 @@ func _ready():
     _builder = PathMeshBuilder.new(_terrain)
     _builder._network.chunk_routes_ready.connect(_routes_ready)
 
+    _terrain.origin_shifted.connect(_update_origin_positions) # Subscribe static scenery to completed origin shifts.
+
 func _routes_ready(cell: Vector2i):
     if maxi(absi(cell.x-_centre.x),absi(cell.y-_centre.y))>4: return
     _dirty[cell] = true
@@ -42,9 +44,6 @@ func _profile__process(_delta: float):
     if _terrain.get_loaded_chunk_count() == 0 or not _player.is_physics_processing(): return
     var world = _terrain.local_to_world_position(_player.global_position)
     var centre = Vector2i(floori(world.x/WorldPathNetwork.CHUNK_SIZE),floori(world.z/WorldPathNetwork.CHUNK_SIZE))
-    for cell in _chunks:
-        var node: MeshInstance3D = _chunks[cell]
-        node.position = _terrain.world_to_local_position(Vector3(cell.x*WorldPathNetwork.CHUNK_SIZE,0,cell.y*WorldPathNetwork.CHUNK_SIZE))
     if centre != _centre: _refresh(centre)
     if not _pending.is_empty() and _building.is_empty():
         var cell = _pending.pop_front()
@@ -122,3 +121,8 @@ func _add_bridges(node: MeshInstance3D, cell: Vector2i):
             if Vector2i((middle/WorldPathNetwork.CHUNK_SIZE).floor()) != cell or seen.has(bridge.key): continue
             seen[bridge.key] = true
             node.add_child(RoadBridge.build(bridge,_terrain,cell))
+
+func _update_origin_positions() -> void: # Reposition retained static roots only after an origin shift.
+    for cell in _chunks:
+        var node: MeshInstance3D = _chunks[cell]
+        node.position = _terrain.world_to_local_position(Vector3(cell.x*WorldPathNetwork.CHUNK_SIZE,0,cell.y*WorldPathNetwork.CHUNK_SIZE))

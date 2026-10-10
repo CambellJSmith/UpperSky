@@ -63,10 +63,9 @@ func eligible(body: Node3D) -> bool:
 func select_target():
     var best: Node3D = target if eligible(target) and actor.global_position.distance_to(target.global_position) <= DISENGAGE_DISTANCE else null
     var best_score: float = float(score_for(best)) if best != null else INF
-    var candidates: Array = get_tree().get_nodes_in_group("npc")
-    candidates.append_array(get_tree().get_nodes_in_group("player"))
+    var candidates: Array[Node3D] = NearbyActorIndex.nearby(get_tree(), actor.global_position, NOTICE_DISTANCE) # Share nearby candidates across this physics frame.
     for body in candidates:
-        if not eligible(body) or actor.global_position.distance_to(body.global_position) > NOTICE_DISTANCE: continue
+        if body == actor or not eligible(body): continue # Reject self and apply social checks only to nearby candidates.
         var score: float = float(score_for(body))
         if score < best_score and line_of_sight_to(body):
             best = body
@@ -95,7 +94,7 @@ func line_of_sight_to(body: Node3D) -> bool:
 
 func tick(delta: float) -> bool:
     _selection_timer -= delta
-    if _selection_timer <= 0 or not eligible(target):
+    if _selection_timer <= 0: # Respect perception cadence even when no hostile target exists.
         select_target()
         _selection_timer = .25
     if health.is_dead() or not eligible(target) or not actor.is_visible_in_tree():

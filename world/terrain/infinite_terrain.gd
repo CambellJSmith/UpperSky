@@ -1,4 +1,6 @@
 extends Node3D # Streams deterministic procedural terrain and tiered water chunks around a tracked player.
+signal origin_shifted # Notify static scenery after a completed floating-origin shift.
+
 class_name InfiniteTerrain # Makes the terrain controller available to the game composition root.
 
 const WATER_PRESENCE_EPSILON: float = 0.02 # Matches shoreline clipping tolerance when deciding whether a real water volume exists.
@@ -79,7 +81,7 @@ func _profile__process(_delta: float) -> void: # Advances bounded terrain and wa
 func get_height_at(world_position: Vector2) -> float: # Exposes the authoritative ground height field to spawning and future world systems.
     if _height_cache.has(world_position): return _height_cache[world_position]
     var height = _height_sampler.sample_height(world_position.x,world_position.y)
-    if _height_cache.size() >= HEIGHT_CACHE_LIMIT: _height_cache.clear()
+    CacheEviction.make_room(_height_cache, HEIGHT_CACHE_LIMIT) # Retain most cached heights at the capacity boundary.
     _height_cache[world_position] = height
     return height
 
@@ -267,6 +269,7 @@ func _rebase_world_if_needed() -> void: # Moves active transforms toward local o
     for chunk_coordinate: Vector2i in _chunks.keys(): # Visits every loaded terrain and water chunk after updating the origin offset.
         var chunk: TerrainChunk = _chunks[chunk_coordinate] # Retrieves the chunk requiring a new near-origin position.
         chunk.position = _get_chunk_local_position(chunk_coordinate) # Repositions ground and water together without regenerating absolute-coordinate geometry.
+    origin_shifted.emit() # Reposition static scenery only after the origin actually changes.
 
 func _is_collision_coordinate(chunk_coordinate: Vector2i) -> bool: # Determines whether one loaded chunk is close enough for physical interaction.
     var offset: Vector2i = chunk_coordinate - _current_chunk_coordinate # Measures chunk-grid distance from the player.

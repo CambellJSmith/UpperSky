@@ -17,6 +17,8 @@ var _elapsed: float = .5
 func _ready():
     _sampler = SettlementSampler.for_terrain(_terrain)
 
+    _terrain.origin_shifted.connect(_update_origin_positions) # Subscribe static scenery to completed origin shifts.
+
 func _process(delta: float):
     # Timing scopes are inactive until a console recording begins.
     if not RuntimeProfiler.recording:
@@ -31,9 +33,6 @@ func _profile__process(delta: float):
         return
     var player_world: Vector3 = _terrain.local_to_world_position(_player.global_position)
     var point = Vector2(player_world.x,player_world.z)
-    for collection in [_homes,_towns]:
-        for root: Node3D in collection.values():
-            root.position = _terrain.world_to_local_position(root.get_meta("world_position"))
     _elapsed += delta
     if _elapsed >= .5:
         _elapsed = 0.0
@@ -284,3 +283,8 @@ func _run_house(town: Node3D, definition: Dictionary, index: int, scheduler: Gen
     scheduler.active_priority = 2
     await _append_house_incremental(town,definition,index,scheduler)
     _building = false
+
+func _update_origin_positions() -> void: # Reposition retained static roots only after an origin shift.
+    for collection in [_homes,_towns]:
+        for root: Node3D in collection.values():
+            root.position = _terrain.world_to_local_position(root.get_meta("world_position"))
