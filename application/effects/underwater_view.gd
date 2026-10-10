@@ -40,8 +40,9 @@ func _process(_delta: float) -> void: # Updates underwater visibility, refractio
         return # Leaves the effect hidden before initialization completes.
     var camera_world_position: Vector3 = _terrain.local_to_world_position(_camera.global_position) # Converts the near-origin camera transform into stable procedural-world coordinates.
     var horizontal_position: Vector2 = Vector2(camera_world_position.x, camera_world_position.z) # Extracts the horizontal coordinate used by terrain and water sampling.
-    var water_exists: bool = _terrain.has_water_at(horizontal_position) # Verifies that rendered water actually occupies this horizontal location.
-    var water_level: float = _terrain.get_water_level_at(horizontal_position) # Reads the exact flat local level used by the water mesh.
+    var water: Dictionary = _terrain.get_water_sample_at(horizontal_position) # Resolves actual occupancy and surface through the shared triangle query.
+    var water_exists: bool = bool(water.present) # Requires occupied water before activating the underwater effect.
+    var water_level: float = float(water.surface_height) # Uses the occupied surface shared with swimming and rendering.
     var surface_offset: float = EXIT_SURFACE_OFFSET if _is_underwater else ENTER_SURFACE_OFFSET # Uses separate enter and exit thresholds to prevent waterline flicker.
     var should_be_underwater: bool = water_exists and camera_world_position.y < water_level + surface_offset # Activates only when the camera is inside a real generated water volume.
     if should_be_underwater != _is_underwater: # Detects a genuine transition across the stabilized waterline.

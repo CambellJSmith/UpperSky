@@ -68,9 +68,10 @@ func _physics_process(delta: float) -> void:
     var terrain := player.get("_terrain") as InfiniteTerrain
     if terrain == null: return
     var world := terrain.local_to_world_position(global_position)
-    if terrain.has_water_at(Vector2(world.x, world.z)):
+    var water: Dictionary = terrain.get_water_sample_at(Vector2(world.x, world.z)) # Resolves the actual occupied surface and planned current.
+    if bool(water.present) and world.y <= float(water.surface_height): # Applies water behaviour only after immersion rather than throughout the sky above a lake.
         freeze = false
         linear_velocity.y = maxf(linear_velocity.y, 0.0)
-        var current := Vector2(sin(world.z * .002), cos(world.x * .002)) * .45
+        var current: Vector2 = Vector2(water.flow) * .45 # Follows river drainage while keeping closed lakes still.
         linear_velocity.x = lerpf(linear_velocity.x, current.x, delta)
         linear_velocity.z = lerpf(linear_velocity.z, current.y, delta)

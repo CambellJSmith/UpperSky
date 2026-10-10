@@ -20,6 +20,8 @@ Water meshes use the final ground grid and diagonal. Workers pass their complete
 | `downstream_id` | Next reach, or empty for a sink | Empty string |
 | `flow` | Downstream direction, or zero for a sink | Zero |
 
+Swimming, underwater effects and corpse water behaviour read the complete production sample. Corpses above a lake are not treated as immersed, and currents follow the planned channel.
+
 `has_water_at` delegates to this contract, with a cheap rejection for points far outside footprints. The compatibility `get_water_level_at` supplies the **planned** body elevation, including dry banks inside a footprint, for conservative vegetation and placement clearance. It returns negative infinity outside planned footprints. Use `present` or `has_water_at` to establish actual water occupancy; an elevation alone does not imply water.
 
 All query coordinates are absolute world coordinates. Origin rebasing only changes scene transforms. Generation revision is recorded in saves; older overworld player positions are raised above new terrain or water if necessary, while inventory, vitals and interior coordinates are retained. Road and ferry caches use new versions because containing shores change terrain.
