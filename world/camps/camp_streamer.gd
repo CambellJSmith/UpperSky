@@ -35,6 +35,7 @@ func _profile__process(delta: float) -> void:
         _elapsed = 0.0
         var world: Vector3 = _terrain.local_to_world_position(_player.global_position)
         var centre: Vector2i = Vector2i(floori(world.x / CampSampler.CELL_SIZE), floori(world.z / CampSampler.CELL_SIZE))
+        _update_residents(Vector2(world.x, world.z)) # Apply existing distance activation to camp residents.
         if centre != _centre:
             _centre = centre
             _refresh()
@@ -88,6 +89,7 @@ func _profile__build_cell(cell: Vector2i) -> void:
     chest.position = Vector3(offset.x,_sampler.ground_height(point+offset)-world.y+.04,offset.y)
     camp.add_child(chest)
     add_child(camp)
+    _add_residents(camp, definition) # Populate both synchronous and incremental camp builds identically.
     _cells[cell] = camp
 
 func _build_cell_incremental(cell: Vector2i, scheduler: GenerationScheduler) -> void:
@@ -110,6 +112,7 @@ func _build_cell_incremental(cell: Vector2i, scheduler: GenerationScheduler) -> 
     chest.position = Vector3(offset.x,_sampler.ground_height(point+offset)-world.y+.04,offset.y)
     camp.add_child(chest)
     add_child(camp)
+    _add_residents(camp, definition) # Populate both synchronous and incremental camp builds identically.
     _cells[cell] = camp
 
 func _run_build(cell: Vector2i, scheduler: GenerationScheduler):
@@ -122,3 +125,22 @@ func _update_origin_positions() -> void: # Reposition retained static roots only
     for root: Node3D in _cells.values():
         if root != null:
             root.position = _terrain.world_to_local_position(root.get_meta("world_position"))
+
+func _add_residents(camp: Node3D, definition: Dictionary) -> void: # Couple resident lifetime to the owning camp.
+    for resident: Dictionary in CampPopulation.definitions(definition): # Spawn exactly one resident per tent.
+        var npc: Villager = Villager.new() # Reuse ordinary animated and persistent actors.
+        npc.name = "Camper %d" % resident.seed # Give residents distinct scene identities.
+        npc.top_level = true # Keep absolute actor transforms independent of the scenery root.
+        npc.configure(_terrain, resident) # Resolve terrain grounding and persistent health before entering the tree.
+        camp.add_child(npc) # Free residents automatically when their camp unloads.
+        var player_world: Vector3 = _terrain.local_to_world_position(_player.global_position) # Resolve the current streaming distance.
+        npc.set_active(player_world.distance_to(npc.world_position) < 420.0) # Keep distant campers dormant.
+
+func _update_residents(point: Vector2) -> void: # Refresh activation on the existing throttled streaming tick.
+    for camp: Node3D in _cells.values(): # Visit only retained camp roots.
+        if camp == null: # Skip cached empty cells.
+            continue # Avoid allocating actors for rejected camps.
+        for child: Node in camp.get_children(): # Reuse camp ownership instead of another population registry.
+            if child is Villager: # Leave scenery processing unchanged.
+                var npc: Villager = child as Villager # Access authoritative absolute actor state.
+                npc.set_active(point.distance_to(Vector2(npc.world_position.x, npc.world_position.z)) < 420.0) # Match other wilderness population activation.

@@ -127,7 +127,7 @@ func _traveller_model(random_value: int) -> int:
     if choice < 11: return 2
     return 7 if posmod(random_value/12,2)==0 else 9
 
-func is_obstructed(point: Vector2) -> bool:
+func is_obstructed(point: Vector2, allow_camp: bool = false) -> bool: # Permit campers to use their reserved clearing.
     var home_cell = Vector2i(floori(point.x/SettlementSampler.HOMESTEAD_CELL_SIZE),floori(point.y/SettlementSampler.HOMESTEAD_CELL_SIZE))
     var home = _settlements.sample_homestead(home_cell)
     if not home.is_empty() and home.bounds.grow(.5).has_point(SettlementSampler.rotate(point-home.position,-home.yaw)): return true
@@ -140,7 +140,7 @@ func is_obstructed(point: Vector2) -> bool:
         if point.distance_to(village.position+SettlementSampler.rotate(Vector2(-5,5),village.yaw)) < 2.1: return true
         for house in village.houses:
             if house.bounds.grow(.5).has_point(SettlementSampler.rotate(point-house.position,-house.yaw)): return true
-    return _settlements._ground.is_clearing(point)
+    return not allow_camp and _settlements._ground.is_clearing(point) # Other populations still avoid camp clearings.
 
 func is_obstructed_incremental(point: Vector2, scheduler: GenerationScheduler) -> bool:
     var home_cell = Vector2i(floori(point.x/SettlementSampler.HOMESTEAD_CELL_SIZE),floori(point.y/SettlementSampler.HOMESTEAD_CELL_SIZE))
