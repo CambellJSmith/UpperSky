@@ -59,12 +59,12 @@ static func build(root: Node3D, tree: SceneTree = null, scheduler: GenerationSch
             else: # Support loading-screen construction without a scheduler.
                 await tree.process_frame # Yield until the next frame.
     for key: String in groups: # Upload each neighbourhood separately for spatial culling.
+        if scheduler != null: # Share upload admission with terrain and procedural houses.
+            if not await scheduler.operation_checkpoint(owner): return false # Cancel before uploading an obsolete neighbourhood.
+        var started: int = Time.get_ticks_usec() # Measure the indivisible neighbourhood upload.
         _commit(root, groups[key]) # Add the completed batch.
-        if scheduler != null: # Respect shared generation scheduling.
-            if not await scheduler.checkpoint(owner): # Stop when the owner is cancelled.
-                return false # Let the caller discard the incomplete city.
-        else: # Support loading-screen construction without a scheduler.
-            await tree.process_frame # Yield between buffer uploads.
+        if scheduler != null: scheduler.record_operation(started) # Report oversized batch commits.
+        else: await tree.process_frame # Retain loading-screen construction without a scheduler.
     return true # Report completed scenery preparation.
 
 static func build_sync(root: Node3D) -> void: # Support immediate exterior and test construction.

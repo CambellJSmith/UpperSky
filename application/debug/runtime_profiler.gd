@@ -183,7 +183,7 @@ func _context() -> Dictionary:
 	context["npcs"] = {"loaded":npcs.size(),"active":active,"in_combat":fighting}
 	var scheduler = GenerationScheduler.instance
 	if scheduler != null:
-		context["generation"] = {"workers":scheduler._workers.size(),"waiting_slices":scheduler._waiters.size(),"completed_jobs":scheduler.completed_jobs,"worker_task_total_ms":scheduler.worker_total_us/1000.0,"worker_task_max_ms":scheduler.worker_max_us/1000.0,"stale_jobs":scheduler.stale_jobs,"budget_ms":GenerationScheduler.FRAME_BUDGET_US/1000.0,"longest_slice_ms":scheduler.longest_slice_us/1000.0}
+		context["generation"] = {"workers":scheduler._workers.size(),"waiting_slices":scheduler._waiters.size(),"completed_jobs":scheduler.completed_jobs,"worker_task_total_ms":scheduler.worker_total_us/1000.0,"worker_task_max_ms":scheduler.worker_max_us/1000.0,"stale_jobs":scheduler.stale_jobs,"budget_ms":GenerationScheduler.FRAME_BUDGET_US/1000.0,"longest_slice_ms":scheduler.longest_slice_us/1000.0,"operation_max_ms":scheduler.operation_max_us/1000.0,"operation_overruns":scheduler.operation_overruns} # Report indivisible engine-call spikes alongside cooperative slices.
 	context["streams"] = counts
 	return context
 func report() -> Dictionary:

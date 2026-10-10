@@ -17,6 +17,8 @@ func run():
     assert(arrays[0][Mesh.ARRAY_COLOR] == reference[Mesh.ARRAY_COLOR])
     assert(arrays[0][Mesh.ARRAY_INDEX] == reference[Mesh.ARRAY_INDEX])
     assert(arrays[1] == water.build_chunk_arrays(cell))
+    var reference_shape: ConcavePolygonShape3D = builder.mesh_from_arrays(reference).create_trimesh_shape() # Compare worker triangles against Godot's original mesh collision path.
+    assert(arrays[2] == reference_shape.get_faces(), "Worker collision differs from mesh collision") # Preserve physics geometry and winding exactly.
     var scheduler = GenerationScheduler.new()
     root.add_child(scheduler)
     var result = []
