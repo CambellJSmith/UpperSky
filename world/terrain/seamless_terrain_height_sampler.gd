@@ -1,13 +1,15 @@
 extends TerrainHeightSampler # Reuses the complete deterministic geological terrain generator while replacing only its discontinuous local-water profile.
 class_name SeamlessTerrainHeightSampler # Retains smooth coastal terrain while water rendering and gameplay use horizontal surfaces.
 
+var _water_body_plan: WaterBodyPlan = WaterBodyPlan.new() # Caches the immutable province privately for final terrain shaping.
+
 func _get_local_water_level(regional_height: float) -> float: # Replaces hard water-tier selection with the shared continuous geological water profile.
     return TerrainWaterProfile.get_continuous_level(regional_height) # Preserves existing terrain and saved locations when changing the water surface.
 
 func sample_height(world_x: float, world_z: float) -> float:
     var point := Vector2(world_x, world_z)
     var height := BiomeProfile.height(point, super.sample_height(world_x, world_z))
-    return WaterBodyPlan.shape_height(point, height + rocky_mountain_uplift(point)) # Resolve the basin shore after biome and mountain terrain shaping.
+    return _water_body_plan.shape(point, height + rocky_mountain_uplift(point)) # Resolve the basin shore after biome and mountain terrain shaping.
 
 static func rocky_mountain_uplift(point: Vector2) -> float:
     # Compact ranges fill the temperate margins between broad biome centres.

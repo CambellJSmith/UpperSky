@@ -155,7 +155,7 @@ func _owns(point: Vector2, corner: Vector2) -> bool:
     return point.x >= corner.x and point.x < corner.x + TerrainConfiguration.CHUNK_SIZE and point.y >= corner.y and point.y < corner.y + TerrainConfiguration.CHUNK_SIZE
 
 func _add_waterfall(chunk: Node3D, corner: Vector2, point: Vector2, definition: Dictionary, drop_z: float) -> void:
-    var top: float = BiomeProfile.river_level(drop_z, definition["sea"])
+    var top: float = float(WaterBodyPlan.definition_at(point - Vector2(0.0, 0.01)).surface_height) # Reads the planned upstream reach at the waterfall lip.
     var curtain: MeshInstance3D = MeshInstance3D.new()
     curtain.name = "Waterfall"
     var surface: SurfaceTool = SurfaceTool.new()
@@ -164,6 +164,13 @@ func _add_waterfall(chunk: Node3D, corner: Vector2, point: Vector2, definition: 
     for strip: int in range(12):
         var x0: float = -120.0 + strip * 20.0
         var x1: float = x0 + 20.0
+        var source_a: Vector2 = point + Vector2(x0, -0.01) # Locates the first upper endpoint in the upstream water body.
+        var source_b: Vector2 = point + Vector2(x1, -0.01) # Locates the second upper endpoint.
+        var sink_offset: float = BiomeProfile.river_x(drop_z + 16.0, definition["phase"]) - BiomeProfile.river_x(drop_z, definition["phase"]) # Follows the planned channel bend into the pool.
+        var sink_a: Vector2 = point + Vector2(x0 * 0.73 + sink_offset, 16.0) # Locates the first plunge-pool endpoint.
+        var sink_b: Vector2 = point + Vector2(x1 * 0.73 + sink_offset, 16.0) # Locates the second plunge-pool endpoint.
+        if not (_terrain.has_water_at(source_a) and _terrain.has_water_at(source_b) and _terrain.has_water_at(sink_a) and _terrain.has_water_at(sink_b)): # Keeps waterfall strips within both connected water reaches.
+            continue # Excludes decorative curtains over dry banks.
         var a: Vector3 = Vector3(x0, 16.0, 0.0)
         var b: Vector3 = Vector3(x1, 16.0, 0.0)
         var c: Vector3 = Vector3(x0 * 0.73 + BiomeProfile.river_x(drop_z + 16.0, definition["phase"]) - BiomeProfile.river_x(drop_z, definition["phase"]), -16.0, 15.0 + sin(strip * 1.3) * 0.5)
@@ -206,7 +213,7 @@ func _foam_disk() -> ArrayMesh:
     for index: int in range(12):
         var a: float = TAU * float(index) / 12.0
         var b: float = TAU * float(index + 1) / 12.0
-        for vertex: Vector3 in [Vector3.ZERO, Vector3(cos(a) * 86.0, 0.0, sin(a) * 25.0), Vector3(cos(b) * 86.0, 0.0, sin(b) * 25.0)]:
+        for vertex: Vector3 in [Vector3.ZERO, Vector3(cos(a) * 44.0, 0.0, sin(a) * 25.0), Vector3(cos(b) * 44.0, 0.0, sin(b) * 25.0)]:
             surface.set_uv(Vector2(vertex.x / 172.0 + 0.5, vertex.z / 50.0 + 0.5))
             surface.set_normal(Vector3.UP)
             surface.add_vertex(vertex)

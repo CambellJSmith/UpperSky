@@ -9,7 +9,7 @@ func check() -> void:
     terrain._water_level_sampler = SeamlessTerrainWaterLevelSampler.new()
     var builder := SeamlessTerrainWaterMeshBuilder.new(terrain._height_sampler, terrain._water_level_sampler, StandardMaterial3D.new())
     var triangles := 0
-    var cells: Array[Vector2i] = [Vector2i.ZERO, Vector2i(-1,-1)]
+    var cells: Array[Vector2i] = [Vector2i.ZERO, Vector2i(-1,-1), Vector2i((WaterBodyPlan.STARTING_LAKE_CENTRE / TerrainConfiguration.CHUNK_SIZE).floor())] # Includes the explicitly planned starting basin.
     for region_cell in [Vector2i.ZERO, Vector2i(-1,0), Vector2i(0,-1)]:
         var definition := BiomeProfile.region(region_cell)
         var centre: Vector2 = definition.centre
@@ -29,6 +29,9 @@ func check() -> void:
             var c := vertices[index+2]
             assert(absf(a.y-b.y)<0.0001 and absf(a.y-c.y)<0.0001, "Inclined water triangle")
             assert(normals[index].is_equal_approx(Vector3.UP))
+            for vertex: Vector3 in [a, b, c]: # Inspects surface endpoints rather than only triangle interiors.
+                var absolute: Vector2 = Vector2(vertex.x, vertex.z) + Vector2(cell) * TerrainConfiguration.CHUNK_SIZE # Restores each endpoint to stable world coordinates.
+                assert(WaterBodyPlan.boundary_at(absolute) > 0.01, "Water reaches an open footprint wall instead of a containing shore") # Requires ground clipping to end water inside the protected basin boundary.
             var midpoint := (a+b+c)/3.0
             var point := Vector2(midpoint.x,midpoint.z) + Vector2(cell)*TerrainConfiguration.CHUNK_SIZE
             assert(absf(terrain.get_water_level_at(point)-a.y)<0.001, "Gameplay differs from mesh")

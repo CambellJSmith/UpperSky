@@ -43,8 +43,11 @@ static func read_file(path: String) -> Dictionary: # Read and validate save file
     if parser.parse(file.get_as_text()) != OK: return {} # Reject invalid JSON without altering the destination.
     var parsed: Variant = parser.data # Read the validated parser result.
     if not parsed is Dictionary or parsed.get("version") != SaveSystem.VERSION or parsed.get("world_seed") != TerrainHeightSampler.WORLD_SEED or not SaveCodec.valid(parsed.get("state")): return {} # Require the supported envelope and bounded codec payload.
+    var generation: Variant = parsed.get("generation_version", 1) # Supports legacy envelopes while checking world-generation compatibility.
+    if not (generation is int or generation is float) or generation < 1 or generation > WaterBodyPlan.GENERATION_VERSION or float(generation) != floorf(float(generation)): return {} # Rejects malformed or newer generation revisions without modifying saves.
     var state: Variant = SaveCodec.decode(parsed.state) # Create private decoded state for semantic validation.
     if not valid_state(state): return {} # Reject structurally valid payloads with invalid gameplay state.
+    state["generation_version"] = int(parsed.get("generation_version", 1)) # Marks old terrain saves for safe exterior relocation without discarding progress.
     return state # Return only a fully verified decoded snapshot.
 
 

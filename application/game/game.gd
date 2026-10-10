@@ -72,6 +72,7 @@ func _initialize_game() -> void: # Builds nearby collision and places the comple
 
 func _find_shoreline_spawn_horizontal() -> Vector2: # Finds dry low-slope terrain immediately beside an actual clipped water body.
     var best_position: Vector2 = PLAYER_SPAWN_FALLBACK_HORIZONTAL # Starts with the guaranteed dry origin in case no shoreline transition can be resolved.
+    var best_is_starting_lake: bool = false # Prefers the explicitly planned temperate starting watershed when reachable.
     var best_score: float = INF # Allows the first valid shoreline candidate to become the current best result.
     for direction_index: int in range(SHORE_SEARCH_DIRECTION_COUNT): # Searches evenly distributed deterministic rays around the world origin.
         var angle: float = TAU * float(direction_index) / float(SHORE_SEARCH_DIRECTION_COUNT) # Converts the direction index into a complete radial distribution.
@@ -94,7 +95,9 @@ func _find_shoreline_spawn_horizontal() -> Vector2: # Finds dry low-slope terrai
                 if _terrain.has_water_at(candidate_position): # Defensively handles irregular cell clipping that bends around the radial transition.
                     candidate_position = refined_dry_position # Falls back to the verified dry boundary sample rather than ever choosing water.
                 var candidate_score: float = _score_shoreline_spawn(candidate_position, _terrain.get_water_level_at(wet_position)) # Measures dryness, bank height, slope, and travel distance.
-                if candidate_score < best_score: # Detects the safest and most natural shoreline start found so far.
+                var is_starting_lake: bool = wet_position.distance_to(WaterBodyPlan.STARTING_LAKE_CENTRE) < WaterBodyPlan.STARTING_LAKE_RADIUS # Identifies the intended starting shoreline.
+                if is_finite(candidate_score) and ((is_starting_lake and not best_is_starting_lake) or (is_starting_lake == best_is_starting_lake and candidate_score < best_score)): # Prefers the planned starting basin before comparing shoreline safety.
+                    best_is_starting_lake = is_starting_lake # Retains the selected watershed preference.
                     best_score = candidate_score # Stores the improved deterministic score.
                     best_position = candidate_position # Stores the associated dry shoreline position.
                 break # Uses only the nearest shoreline transition along each ray to keep startup work bounded.
@@ -170,6 +173,12 @@ func _restore_saved_game():
         dungeon._starting_region_coordinate = state.starting_pair.region_coordinate
     # Build overworld collision before restoring an interior so exits remain usable.
     var exterior: Vector3 = state.position if state.active_pair == null else state.active_pair.endpoint_a_world_position
+    if int(state.get("generation_version", 1)) < WaterBodyPlan.GENERATION_VERSION: # Repairs player clearance after basin terrain changes.
+        var horizontal: Vector2 = Vector2(exterior.x, exterior.z) # Samples the saved absolute overworld position.
+        var safe_height: float = maxf(_terrain.get_height_at(horizontal), _terrain.get_water_level_at(horizontal)) + 2.0 # Clears new terrain and any planned water surface.
+        exterior.y = maxf(exterior.y, safe_height) # Preserves safe elevated saves while preventing buried restoration.
+        if state.active_pair == null: # Keeps interior coordinates independent of overworld generation.
+            state.position = exterior # Restores the adjusted exterior through the normal loading path.
     _player.global_position = exterior
     _terrain.initialize(_player,_dynamic_entities)
     _terrain._rebase_world_if_needed()

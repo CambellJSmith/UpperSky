@@ -98,7 +98,7 @@ func _can_save(slot: String) -> bool: # Share readiness checks between synchrono
     return true # Allow a consistent scene snapshot.
 
 func _capture_job(slot: String) -> SaveFileJob: # Freeze mutable gameplay objects before handing off file work.
-    var data: Dictionary = {"version":VERSION,"world_seed":TerrainHeightSampler.WORLD_SEED,"saved_at":Time.get_datetime_string_from_system(true),"state":SaveCodec.encode(snapshot())} # Encoding creates fresh primitive containers without shared resources.
+    var data: Dictionary = {"version":VERSION,"world_seed":TerrainHeightSampler.WORLD_SEED,"generation_version":WaterBodyPlan.GENERATION_VERSION,"saved_at":Time.get_datetime_string_from_system(true),"state":SaveCodec.encode(snapshot())} # Encoding creates fresh primitive containers without shared resources.
     return SaveFileJob.new(ProjectSettings.globalize_path(folder), slot, data) # Keep worker code independent of project nodes.
 
 func request_save(slot: String = "current") -> bool: # Start a nonblocking gameplay save without queuing duplicate snapshots.

@@ -250,6 +250,12 @@ func _build_chunk(chunk_coordinate: Vector2i) -> void:
     RuntimeProfiler.end(_profile_token)
 
 func _profile__build_chunk(chunk_coordinate: Vector2i) -> void: # Generates one terrain chunk with clipped water and installs its streamable runtime node.
+    if _water_mesh_builder is SeamlessTerrainWaterMeshBuilder: # Shares final ground arrays during synchronous production startup.
+        var ground: Array = _mesh_builder.build_chunk_arrays(chunk_coordinate) # Builds the final ground once before water clipping.
+        var ground_mesh: ArrayMesh = _mesh_builder.mesh_from_arrays(ground) # Uploads the authoritative ground buffer.
+        var water_arrays: Array = (_water_mesh_builder as SeamlessTerrainWaterMeshBuilder).build_chunk_arrays(chunk_coordinate, ground) # Clips water against completed ground without repeating terrain sampling.
+        _install_meshes(chunk_coordinate, ground_mesh, _water_mesh_builder.mesh_from_arrays(water_arrays)) # Installs matching synchronous ground and water surfaces.
+        return # Avoids the legacy independent sampling path.
     var terrain_mesh: ArrayMesh = _mesh_builder.build_chunk_mesh(chunk_coordinate) # Generates ground vertices, normals, colours, indices, and material assignment.
     var water_mesh: ArrayMesh = _water_mesh_builder.build_chunk_mesh(chunk_coordinate) # Generates only submerged water polygons and sealed local level transitions.
     _install_meshes(chunk_coordinate,terrain_mesh,water_mesh)

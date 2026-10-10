@@ -7,6 +7,8 @@ const SEAMLESS_WATER_UV_SCALE: float = 0.0078125
 const SEAMLESS_WATER_CLIP_EPSILON: float = 0.02
 const SEAMLESS_MINIMUM_TRIANGLE_AREA_SQUARED: float = 0.000001
 
+var _body_plan: WaterBodyPlan = WaterBodyPlan.new() # Owns a private provincial cache for vertex clipping.
+
 func _init(height_sampler: TerrainHeightSampler, water_level_sampler: TerrainWaterLevelSampler, water_material: Material) -> void:
     super(height_sampler, water_level_sampler, water_material)
 
@@ -30,7 +32,7 @@ func build_chunk_arrays(chunk_coordinate: Vector2i, ground_arrays: Array = []) -
             var world_x: float = chunk_world_x + float(vertex_x) * vertex_spacing
             var cache_index: int = vertex_z * water_resolution + vertex_x
             terrain_height_cache[cache_index] = _height_sampler.sample_height(world_x, world_z) if ground_vertices.is_empty() else ground_vertices[cache_index].y # Clips against the supplied final ground without rebuilding it.
-            boundary_cache[cache_index] = float(WaterBodyPlan.definition_at(Vector2(world_x, world_z)).boundary) # Samples the same footprint used by gameplay.
+            boundary_cache[cache_index] = _body_plan.boundary(Vector2(world_x, world_z)) # Samples the same footprint used by gameplay.
 
     var vertices: Array[Vector3] = []
     var normals: Array[Vector3] = []
@@ -51,8 +53,8 @@ func build_chunk_arrays(chunk_coordinate: Vector2i, ground_arrays: Array = []) -
             var terrain_bottom_right: Vector3 = Vector3(local_right, terrain_height_cache[bottom_right_index], local_forward)
             if maxf(maxf(boundary_cache[top_left_index], boundary_cache[top_right_index]), maxf(boundary_cache[bottom_left_index], boundary_cache[bottom_right_index])) <= 0.0: # Rejects cells outside explicit water bodies.
                 continue # Avoids emitting water merely because terrain is low.
-            var plan: Dictionary = WaterBodyPlan.definition_at(Vector2(chunk_world_x + (local_left + local_right) * 0.5, chunk_world_z + (local_back + local_forward) * 0.5)) # Resolves one body and reach for the ground cell.
-            var level: float = float(plan.surface_height) # Keeps calm connected water at its planned elevation.
+            var centre: Vector2 = Vector2(chunk_world_x + (local_left + local_right) * 0.5, chunk_world_z + (local_back + local_forward) * 0.5) # Resolves the owning planned reach at the cell centre.
+            var level: float = _body_plan.surface_height(centre) # Samples calm elevation without allocating body metadata.
             var water_top_left: Vector3 = Vector3(local_left, level, local_back)
             var water_top_right: Vector3 = Vector3(local_right, level, local_back)
             var water_bottom_left: Vector3 = Vector3(local_left, level, local_forward)
