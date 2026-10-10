@@ -46,7 +46,6 @@ func _process(delta: float):
     for key in _actors.keys():
         var entry: Dictionary = _actors[key]
         var npc: Villager = entry.npc
-        npc.position = _terrain.world_to_local_position(npc.world_position)
         if not night:
             npc.set_active(false)
             npc.remove_from_group("npc")

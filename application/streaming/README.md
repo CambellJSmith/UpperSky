@@ -26,3 +26,7 @@ Checks:
 Validation included a 30-second headless full-world capture with no frames above 100 ms, plus a Compatibility renderer smoke test. Headless FPS is not comparable to a rendered gameplay capture. Use `profile start`, follow the same route as the original report, then `profile export` to measure the remaining bottlenecks on the player's graphics hardware.
 
 The continuity regression deliberately blocks the background search slot while checking fresh terrain, actual tree/boulder placements, shrubs/grass, and new chunks after a kilometre of movement. The scheduler regression checks that essential jobs still complete with a blocked search and that low-priority work progresses under a continuously renewed high-priority task.
+
+Static camps, paths and settlement roots update their local positions on `InfiniteTerrain.origin_shifted`, rather than on every rendered frame. The event fires after the dynamic roots, terrain chunks and absolute origin offset have been updated. Suspended NPCs subscribe independently so their local coordinates remain correct when reactivated.
+
+Origin regression: `godot --headless --path . --script application/streaming/tests/run_regression.gd -- application/streaming/tests/check_origin_updates.gd`. The runner loads production scene dependencies first, avoiding the existing equipment preload cycle seen when some standalone test scripts are loaded first. Use an isolated `XDG_DATA_HOME` for integration tests that create saves or road caches.

@@ -1,7 +1,7 @@
 extends Node3D # Streams deterministic procedural terrain and tiered water chunks around a tracked player.
-signal origin_shifted # Notify static scenery after a completed floating-origin shift.
-
 class_name InfiniteTerrain # Makes the terrain controller available to the game composition root.
+
+signal origin_shifted # Notify static scenery after a completed floating-origin shift.
 
 const WATER_PRESENCE_EPSILON: float = 0.02 # Matches shoreline clipping tolerance when deciding whether a real water volume exists.
 const INVALID_WATER_CELL: Vector2i = Vector2i(2_147_483_647, 2_147_483_647) # Forces the first exact water query to populate its cell cache.

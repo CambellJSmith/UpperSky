@@ -23,3 +23,9 @@ Only NPCs without a weapon use unarmed combat. Unarmed melee attacks alternate t
 Unarmed wizards cast visible low-poly fireballs with an 18-metre attack range, half-second windup and two-second cooldown. Each deals 20 damage and travels at 16 metres/second along its original aim. Swept collision rays stop it at the first wall or character, including friendly NPCs, and retain the caster as the damage source. Armed wizards use their weapon instead.
 
 Checks: `godot --headless --path . --script actors/combat/tests/check_npc_combat.gd` and `actors/combat/tests/check_npc_grudges.gd`.
+
+## Perception Work
+
+Target searches respect their quarter-second interval even when no target exists. Initial search phases are spread across actors. Player-affection changes and direct NPC provocation request an immediate search; dead actors skip perception. A shared spatial index collects actor groups at most once per physics frame and filters by notice distance before social eligibility checks. Spawn, removal and floating-origin shifts invalidate the snapshot.
+
+Regression: `godot --headless --path . --script application/streaming/tests/run_regression.gd -- actors/combat/tests/check_perception_budget.gd`.

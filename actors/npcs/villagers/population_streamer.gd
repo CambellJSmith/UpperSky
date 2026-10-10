@@ -35,7 +35,6 @@ func _profile__process(delta: float):
 	var point = Vector2(position_world.x,position_world.z)
 	for group in _groups.values():
 		for npc: Villager in group:
-			npc.position = _terrain.world_to_local_position(npc.world_position)
 			npc.set_active(point.distance_to(Vector2(npc.world_position.x,npc.world_position.z)) < LOAD_DISTANCE)
 	_elapsed += delta
 	if _elapsed > 1.0:

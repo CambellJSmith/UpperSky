@@ -8,9 +8,27 @@ func run():
     var terrain = game.get_node("World/Terrain")
     var paths = game.get_node("World/Paths")
     var player = game.get_node("DynamicEntities/Player")
-    for i in range(100): await process_frame
-    console._execute_command("town")
-    for i in range(160): await process_frame
+    var startup_deadline: int = Time.get_ticks_msec() + 15000 # Bound initial collision-backed loading.
+    while not player.is_physics_processing() and Time.get_ticks_msec() < startup_deadline: # Wait for ready gameplay rather than a hardware-dependent frame count.
+        await process_frame # Let incremental startup complete.
+    assert(player.is_physics_processing(), "Startup did not finish") # Reject an incomplete streaming fixture.
+    var sampler: SettlementSampler = SettlementSampler.for_terrain(terrain) # Select a town that has exterior residents.
+    var absolute: Vector3 = terrain.local_to_world_position(player.global_position) # Locate the current search region.
+    var centre: Vector2i = Vector2i((Vector2(absolute.x, absolute.z) / SettlementSampler.TOWN_CELL_SIZE).floor()) # Search near the real spawn.
+    var town: Dictionary = {} # Retain a valid ordinary town fixture.
+    for z: int in range(-3, 4): # Examine nearby settlement regions.
+        for x: int in range(-3, 4): # Find a town whose residents live in the overworld.
+            var candidate: Dictionary = sampler.sample_town(centre + Vector2i(x, z)) # Inspect deterministic placement.
+            if not candidate.is_empty() and not CityGeometry.is_city(candidate): # Cities keep their population in a separate space.
+                town = candidate # Retain an ordinary town.
+                break # Stop the current row after finding the fixture.
+        if not town.is_empty(): break # Stop once a town is available.
+    assert(not town.is_empty(), "No ordinary town fixture found") # Require an exterior population to exercise.
+    player.set_fly_mode_enabled(true) # Keep the fixture clear of unloaded collision.
+    player.global_position = terrain.world_to_local_position(Vector3(town.position.x, town.height + 30.0, town.position.y)) # Visit the selected town directly.
+    var town_deadline: int = Time.get_ticks_msec() + 20000 # Bound incremental town and resident loading.
+    while (population.get_child_count() < 8 or paths._chunks.is_empty()) and Time.get_ticks_msec() < town_deadline: # Wait for useful streaming output.
+        await process_frame # Allow real-time streamer intervals and scheduler slices to progress.
     assert(paths._chunks.size() > 0 and paths._chunks.size() <= 81)
     assert(population.get_child_count() >= 6)
     assert(population.get_child_count() <= VillagerPopulationStreamer.MAX_NPCS)
@@ -24,6 +42,7 @@ func run():
     assert(population.perform_nearby("punch"))
     var world_position: Vector3 = npc.world_position
     terrain._world_origin_offset += Vector2(512,-512)
+    terrain.origin_shifted.emit() # Notify retained actors and static scenery after the simulated rebase.
     population._process(0)
     paths._process(0)
     for cell in paths._chunks:
@@ -38,7 +57,12 @@ func run():
     assert(population._elapsed == elapsed)
     game.get_node("DungeonSystem")._set_overworld_active(true)
     console._execute_command("homestead")
-    for i in range(150): await process_frame
+    var home_deadline: int = Time.get_ticks_msec() + 20000 # Bound homesteader streaming after travel.
+    var has_homesteader: bool = false # Observe the actual resident outcome.
+    while not has_homesteader and Time.get_ticks_msec() < home_deadline: # Wait for a real streamed resident rather than a fixed frame count.
+        await process_frame # Let placement and population slices progress.
+        for child: Node in population.get_children(): # Inspect the currently loaded actors.
+            if child.role == "homesteader": has_homesteader = true # Stop waiting after the expected resident appears.
     var found = false
     for child in population.get_children():
         if child.role == "homesteader": found = true
