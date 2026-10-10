@@ -38,7 +38,7 @@ func _points(bounds: Rect2) -> Array[Vector2]: # Find every possible extremum of
         for direction: Vector2 in [Vector2.RIGHT, Vector2.DOWN, Vector2.ONE]: # Intersect vertical, horizontal and anti-diagonal terrain triangle edges.
             var first: float = start.dot(direction) # Project onto this lattice line family.
             var last: float = finish.dot(direction) # Project the other boundary endpoint.
-            if is_equal_approx(first, last): # Skip parallel edges whose endpoints already cover extrema.
+            if absf(last - first) < 0.000001: # Use an absolute parallel-edge tolerance that stays stable far from the world origin.
                 continue # Avoid dividing by a degenerate projection.
             for line: int in range(ceili(minf(first, last) / spacing), floori(maxf(first, last) / spacing) + 1): # Visit only lattice lines crossing this boundary.
                 var fraction: float = (float(line) * spacing - first) / (last - first) # Locate the exact clipped-triangle boundary vertex.
@@ -69,6 +69,11 @@ func fit_incremental(scheduler: GenerationScheduler) -> Dictionary: # Share admi
             if not await scheduler.checkpoint(): # Respect cancellation while fitting the entrance.
                 return {} # Avoid allocating an incomplete entrance.
             _height(point) # Cache the sampled ground before assembling the profile.
+    for index: int in range(15): # Admit terrain extrema inside each approach section as well as its edges.
+        for point: Vector2 in _points(Rect2(-5.0, 62.0 + float(index) * 2.0, 10.0, 2.0)): # Include interior terrain triangle vertices that a boundary-only fit would miss.
+            if not await scheduler.checkpoint(): # Keep approach clearance work under the same construction budget.
+                return {} # Cancel without retaining partial alignment.
+            _height(point) # Prewarm the exact section sample for profile assembly.
     return _finish(result) # Assemble the complete snapshot from admitted cached queries.
 
 func _finish(result: Dictionary) -> Dictionary: # Resolve a supported platform and terrain-aware approach profile.
@@ -80,9 +85,26 @@ func _finish(result: Dictionary) -> Dictionary: # Resolve a supported platform a
         var interval: Dictionary = {"lowest": INF, "highest": -INF} # Resolve terrain across the full walking width.
         _include(_points(Rect2(-5.0, z - 0.01, 10.0, 0.02)), interval) # Include triangle intersections across the approach edge.
         approach.append({"z": z, "ground": float(interval.highest), "bottom": float(interval.lowest) - 0.5}) # Keep support and surface requirements separate.
+    result.base = maxf(float(result.base), float(approach.front().ground) - 1.55) # Keep the drawbridge endpoint above terrain immediately outside the retained footprint.
     var start: float = float(result.base) + 1.6 # Meet the existing drawbridge walking surface exactly.
     var finish: float = float(approach.back().ground) + 0.05 # Meet real terrain at the road end rather than the city's centre height.
     for index: int in range(approach.size()): # Create a continuous terrain-clearing walking profile.
         approach[index]["top"] = maxf(lerpf(start, finish, float(index) / float(approach.size() - 1)), float(approach[index].ground) + 0.05) # Retain intermediate hills while connecting both known endpoints.
+    for index: int in range(approach.size() - 1): # Clear terrain extrema inside each visible walking prism.
+        var section: Array[Vector2] = _points(Rect2(-5.0, float(approach[index].z), 10.0, 2.0)) # Include all clipped terrain triangle extrema in this section.
+        for point: Vector2 in section: # Compare actual terrain against the proposed planar ramp surface.
+            var fraction: float = clampf((point.y - float(approach[index].z)) / 2.0, 0.0, 1.0) # Locate the point between adjoining walking edges.
+            var ground: float = _height(point) # Reuse the admitted construction snapshot.
+            approach[index].bottom = minf(float(approach[index].bottom), ground - 0.5) # Embed the whole prism below interior depressions too.
+            var deficit: float = ground + 0.05 - lerpf(float(approach[index].top), float(approach[index + 1].top), fraction) # Detect terrain protruding through the planned walking surface.
+            if deficit <= 0.0: # Keep an already clear surface unchanged.
+                continue # Avoid unnecessary profile changes.
+            if index == 0 and fraction > 0.000001: # Preserve the exact drawbridge anchor while lifting its neighbouring edge.
+                approach[index + 1].top += deficit / fraction # Clear the obstruction without separating the ramp from the bridge.
+            elif index == approach.size() - 2 and fraction < 0.999999: # Preserve the exact natural-ground anchor at the road end.
+                approach[index].top += deficit / (1.0 - fraction) # Clear the obstruction without introducing a terminal step.
+            elif index > 0 and index < approach.size() - 2: # Lift unanchored adjoining edges together.
+                approach[index].top += deficit # Preserve a continuous supported interior profile.
+                approach[index + 1].top += deficit # Clear the same obstruction across the full segment.
     result["approach"] = approach # Return the immutable construction profile with footprint bounds.
     return result # Keep all later geometry free of terrain queries.
