@@ -568,8 +568,10 @@ func _flush_incremental(scheduler: GenerationScheduler):
     var bounds: AABB
     var has_bounds: bool = false
     for key: String in _streams:
-        if not await scheduler.checkpoint(): return
+        if not await scheduler.operation_checkpoint(): return # Avoid combining expensive material uploads in one frame.
+        var started: int = Time.get_ticks_usec() # Measure the indivisible surface commit separately.
         var mesh = (_streams[key] as SurfaceTool).commit()
+        scheduler.record_operation(started) # Expose oversized commits in generation diagnostics.
         mesh.surface_set_material(0,_materials[key])
         var node = MeshInstance3D.new()
         node.name = key.to_pascal_case()+"Geometry"

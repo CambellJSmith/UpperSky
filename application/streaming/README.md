@@ -30,3 +30,22 @@ The continuity regression deliberately blocks the background search slot while c
 Static camps, paths and settlement roots update their local positions on `InfiniteTerrain.origin_shifted`, rather than on every rendered frame. The event fires after the dynamic roots, terrain chunks and absolute origin offset have been updated. Suspended NPCs subscribe independently so their local coordinates remain correct when reactivated.
 
 Origin regression: `godot --headless --path . --script application/streaming/tests/run_regression.gd -- application/streaming/tests/check_origin_updates.gd`. The runner loads production scene dependencies first, avoiding the existing equipment preload cycle seen when some standalone test scripts are loaded first. Use an isolated `XDG_DATA_HOME` for integration tests that create saves or road caches.
+
+## Save and collision work
+
+Periodic autosaves and keyboard quick saves capture an encoded point-in-time snapshot on the main thread, then use a separate save worker for JSON serialization, file writes/flushes, parsing and full verification of the temporary and previous saves. No live inventory, health, NPC dictionary or scene node is handed to that worker. Only one transaction may be in flight; periodic requests coalesce and an overlapping keyboard quick-save request reports that it was not accepted. Status changes and notices occur after the task is joined. Explicit `save_slot`, load/reload and shutdown preserve their synchronous completion contracts. Snapshot capture/encoding still costs main-thread time proportional to persisted state; it is not covered by the generation budget.
+
+Inactive terrain bodies detach their physical shape, while retaining the most recently used exact concave shapes. The streamer limits this cache to sixteen inactive chunks in addition to the active physical neighbourhood. Visual chunk unloading releases cache ownership. Returning to a retained chunk reuses the same shape; returning after eviction rebuilds it. Seamless workers additionally expand indexed ground triangles into CPU collision faces, avoiding render-mesh readback at installation and subsequent rebuilds. These face buffers live with the bounded visual chunk set and do not lower collision resolution.
+
+Streamed ground upload, water upload and final node/near-collision installation now pass through shared engine-operation admission. At most one admitted costly operation runs per rendered frame across terrain, incremental house surface commits and scheduled city batch uploads. The in-flight chunk guard remains set until all stages finish. Every resumed terrain stage checks that its coordinate is still desired and was not synchronously replaced. Loading-screen and explicit teleport collision setup retain their immediate safety contract.
+
+Admission prevents several expensive operations from being combined in the same generation frame, but cannot preempt one engine call or guarantee a hard frame maximum. Profiler generation context includes `operation_max_ms` and `operation_overruns` to reveal that remaining limitation. This can increase generation latency while reducing combined per-frame spikes; compare rendered captures on the same route before claiming an FPS improvement.
+
+Additional regressions, invoked through `tests/run_regression.gd -- <script>`:
+
+- `application/save/tests/check_background_save.gd`: detached mutable state, request coalescing, ordering, teardown and failed writes.
+- `world/terrain/tests/check_collision_cache.gd`: exact shape identity reuse, inactive physics removal, bounded eviction and actual ground after reactivation.
+- `application/streaming/tests/check_staged_install.gd`: multi-frame handoff, collision installation, stale travel cancellation and operation measurements.
+- `application/streaming/tests/check_worker_collision.gd`: independently generated ground/water parity with completed road masks, and exact collision output from the original engine mesh path.
+
+CPU collision positions use the same vertex snapping rule as [Godot's TriangleMesh implementation](https://github.com/godotengine/godot/blob/master/core/math/triangle_mesh.cpp), applied once per unique vertex. The parity check detects future engine changes to that rule. This avoids building the mesh-readback TriangleMesh and its separate CPU BVH on the main thread.

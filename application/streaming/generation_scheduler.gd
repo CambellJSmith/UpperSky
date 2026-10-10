@@ -26,6 +26,9 @@ var completed_jobs = 0
 var stale_jobs = 0
 var longest_slice_us = 0
 var _frame_begin = 0
+var _operation_frame: int = -1 # Separate costly engine calls across rendered frames.
+var operation_max_us: int = 0 # Expose the worst indivisible engine operation.
+var operation_overruns: int = 0 # Count operations that exceed the entire cooperative budget.
 
 func _ready():
 	instance = self
@@ -101,6 +104,24 @@ func checkpoint(owner: Node = null) -> bool:
 		_waiters.append(ticket)
 		await ticket.resumed
 	return not _closing and (not had_owner or is_instance_valid(owner))
+
+func operation_checkpoint(owner: Node = null) -> bool: # Admit one costly engine operation per frame across cooperative owners.
+	if owner == null: owner = active_owner # Retain existing ownership conventions.
+	var had_owner: bool = is_instance_valid(owner) # Detect teardown while waiting for the next frame.
+	while not _closing: # Unwind staged installation when the scheduler shuts down.
+		if not await checkpoint(owner): return false # Preserve pause, priority and deadline checks.
+		if had_owner and not is_instance_valid(owner): return false # Reject removed scene owners.
+		var frame: int = Engine.get_process_frames() # Share admission between worker applies and resumed generators.
+		if _operation_frame != frame: # Prevent expensive stages from accumulating in one frame.
+			_operation_frame = frame # Reserve this frame's engine operation before returning.
+			return true # Allow the caller to execute one indivisible operation.
+		await frame_started # Resume through the scheduler rather than spinning on the deadline.
+	return false # Reject work during teardown.
+
+func record_operation(started_us: int) -> void: # Measure indivisible work separately from coroutine slices.
+	var duration: int = Time.get_ticks_usec() - started_us # Include engine work performed after admission.
+	operation_max_us = maxi(operation_max_us, duration) # Preserve the largest observed operation.
+	if duration > FRAME_BUDGET_US: operation_overruns += 1 # Surface the remaining soft-budget limitation.
 
 func has_worker_room(background: bool = false) -> bool:
 	if _closing or _workers.size() >= WORKER_LIMIT: return false

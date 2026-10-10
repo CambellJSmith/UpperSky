@@ -12,6 +12,10 @@ var status = "No save yet."
 var _notice_label: Label
 var _notice_seconds = 0.0
 var _quit_save_failed = false
+var _save_task: int = -1 # Bound the save system to one in-flight transaction.
+var _save_job: SaveFileJob # Retain the worker and its private data until joined.
+var _save_slot: String = "" # Preserve notification identity across frames.
+var last_worker_us: int = 0 # Report save serialization and disk work separately.
 static var requested_load = ""
 static var requested_folder = ""
 
@@ -41,18 +45,19 @@ func prepare() -> Dictionary:
     return startup
 
 func _process(delta):
+    if _save_task >= 0 and WorkerThreadPool.is_task_completed(_save_task): finish_pending_save() # Poll without blocking the gameplay thread.
     _notice_seconds = maxf(0,_notice_seconds-delta)
     if _notice_label != null: _notice_label.visible = _notice_seconds > 0
     if not ready_to_save: return
     elapsed += delta
     if elapsed >= 60.0:
         elapsed = 0.0
-        if not protect_invalid_save: save_slot("current")
+        if not protect_invalid_save: request_save("current") # Coalesce autosaves while a transaction is in flight.
 
 func _unhandled_input(event):
     if event is InputEventKey and event.pressed and not event.echo:
         if event.keycode == KEY_F5:
-            save_slot("quick")
+            request_save("quick") # Keep quick-save disk work out of input handling.
             get_viewport().set_input_as_handled()
         elif event.keycode == KEY_F9:
             load_slot("quick")
@@ -83,35 +88,62 @@ func snapshot() -> Dictionary:
     var city_state: Dictionary = cities.snapshot() if cities != null else {}
     return {"city":city_state,"position":city_state.return_position if not city_state.is_empty() else player.global_position if dungeon._active_dungeon != null else player.water_transport.save_position(player) if is_instance_valid(player.water_transport) else terrain.local_to_world_position(player.global_position),"yaw":player.rotation.y,"pitch":player._pitch,"inventory":stacks,"equipment":String(player.get_node("PlayerEquipment").get_equipped_item_id()),"vitals":[vitals.get_health(),vitals.get_maximum_health(),vitals.get_stamina(),vitals.get_maximum_stamina(),vitals.get_mana(),vitals.get_maximum_mana(),vitals.get_experience()],"time":clock.get_time_of_day_hours(),"time_speed":clock.get_speed_multiplier(),"loot":LootSession.records,"shrines":WayshrineRegistry.activated,"starting_pair":dungeon._starting_pair,"active_pair":dungeon._active_pair}
 
-func save_slot(slot: String = "current") -> bool:
-    if slot not in ["current","quick"]: return _fail("Use current or quick as the save slot.")
-    if not ready_to_save: return _fail("Wait for the world to finish loading.")
-    var player = get_parent().get_node("DynamicEntities/Player")
-    if not player.is_physics_processing():
-        status = "Wait until travel finishes before saving."
-        return false
-    var data = {"version":VERSION,"world_seed":TerrainHeightSampler.WORLD_SEED,"saved_at":Time.get_datetime_string_from_system(true),"state":SaveCodec.encode(snapshot())}
-    var path = folder.path_join(slot+".json")
-    if DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(folder)) != OK: return _fail("Cannot create save folder.")
-    var file = FileAccess.open(path+".tmp",FileAccess.WRITE)
-    if file == null: return _fail("Cannot write save file.")
-    file.store_string(JSON.stringify(data))
-    file.flush()
-    var error = file.get_error()
-    file.close()
-    if error != OK: return _fail("Save write failed; previous save retained.")
-    if not _read_file(path+".tmp").is_empty():
-        # Only rotate a verified previous save, retaining recovery when the main file is damaged.
-        if not _read_file(path).is_empty():
-            if FileAccess.file_exists(path+".bak"): DirAccess.remove_absolute(path+".bak")
-            if DirAccess.rename_absolute(path,path+".bak") != OK: return _fail("Cannot back up previous save.")
-        if DirAccess.rename_absolute(path+".tmp",path) != OK: return _fail("Cannot install save; backup retained.")
-        protect_invalid_save = false
-        status = "Saved: "+ProjectSettings.globalize_path(path)
-        print(status)
-        _show_notice("Game saved" if slot == "current" else "Quick save complete")
-        return true
-    return _fail("Save verification failed; previous save retained.")
+func _can_save(slot: String) -> bool: # Share readiness checks between synchronous and background saves.
+    if slot not in ["current", "quick"]: return _fail("Use current or quick as the save slot.") # Reject unsupported destinations.
+    if not ready_to_save: return _fail("Wait for the world to finish loading.") # Avoid partial startup snapshots.
+    var player: Node = get_parent().get_node("DynamicEntities/Player") # Read scene state only on the gameplay thread.
+    if not player.is_physics_processing(): # Preserve the travel transition guard.
+        status = "Wait until travel finishes before saving." # Explain why no snapshot was started.
+        return false # Keep the previous slot intact.
+    return true # Allow a consistent scene snapshot.
+
+func _capture_job(slot: String) -> SaveFileJob: # Freeze mutable gameplay objects before handing off file work.
+    var data: Dictionary = {"version":VERSION,"world_seed":TerrainHeightSampler.WORLD_SEED,"saved_at":Time.get_datetime_string_from_system(true),"state":SaveCodec.encode(snapshot())} # Encoding creates fresh primitive containers without shared resources.
+    return SaveFileJob.new(ProjectSettings.globalize_path(folder), slot, data) # Keep worker code independent of project nodes.
+
+func request_save(slot: String = "current") -> bool: # Start a nonblocking gameplay save without queuing duplicate snapshots.
+    if _save_task >= 0: # Bound memory and prevent overlapping file rotations.
+        if slot == "quick": _show_notice("Save in progress; quick save again when it finishes.") # Explain an unaccepted explicit request.
+        return false # Coalesce periodic saves without capturing redundant snapshots.
+    if not _can_save(slot): return false # Respect loading and travel readiness.
+    _save_job = _capture_job(slot) # Capture a consistent point in time on the scene thread.
+    _save_slot = slot # Remember the notification identity until completion.
+    _save_task = WorkerThreadPool.add_task(_save_job.run, false, "Save game") # Move JSON, disk I/O and full validation off gameplay callbacks.
+    if _save_task < 0: # Handle worker submission failure explicitly.
+        _save_job = null # Release the rejected snapshot.
+        return _fail("Cannot start save worker.") # Preserve the previous save.
+    status = "Saving game..." # Report progress without claiming durability early.
+    return true # Report acceptance rather than file completion.
+
+func finish_pending_save() -> bool: # Join a pending transaction before explicit loading, saving or teardown.
+    if _save_task < 0: return true # Avoid a pool query without a live task.
+    WorkerThreadPool.wait_for_task_completion(_save_task) # Join before observing worker-owned result fields.
+    _save_task = -1 # Release the consumed pool identity.
+    var job: SaveFileJob = _save_job # Retain the result until the scene notification completes.
+    _save_job = null # Release the detached snapshot after this call.
+    return _complete_save(_save_slot, job) # Apply status and notices exclusively on the main thread.
+
+func _complete_save(slot: String, job: SaveFileJob) -> bool: # Apply a joined transaction result to scene-owned UI.
+    last_worker_us = job.duration_us # Expose worker duration separately from main-thread snapshot cost.
+    if not job.error.is_empty(): return _fail(job.error) # Keep failure handling consistent across both APIs.
+    protect_invalid_save = false # Resume autosaving after a verified explicit repair.
+    status = "Saved: " + ProjectSettings.globalize_path(folder.path_join(slot+".json")) # Report the installed slot.
+    print(status) # Preserve existing save logging.
+    _show_notice("Game saved" if slot == "current" else "Quick save complete") # Notify only after installation succeeds.
+    return true # Report durable success.
+
+func save_slot(slot: String = "current") -> bool: # Retain immediate completion for explicit setup, tests and exit saves.
+    finish_pending_save() # Serialize this write behind any in-flight autosave.
+    if not _can_save(slot): return false # Respect scene readiness.
+    var job: SaveFileJob = _capture_job(slot) # Freeze the state through the same production snapshot path.
+    job.run() # Complete explicitly synchronous callers before returning.
+    return _complete_save(slot, job) # Preserve the boolean durability contract.
+
+func _exit_tree() -> void: # Prevent a save worker from outliving its owning scene.
+    if _save_task >= 0: # Avoid accessing scene-owned notices during teardown.
+        WorkerThreadPool.wait_for_task_completion(_save_task) # Complete the detached file transaction before releasing the owner.
+        _save_task = -1 # Consume the pool identity exactly once.
+        _save_job = null # Release worker-owned snapshot data after joining.
 
 func read_slot(slot: String) -> Dictionary:
     var path = folder.path_join(slot+".json")
@@ -124,62 +156,14 @@ func read_slot(slot: String) -> Dictionary:
             status = "Save is damaged or incompatible; automatic saving paused to preserve it."
     return result
 
-func _read_file(path: String) -> Dictionary:
-    var file = FileAccess.open(path,FileAccess.READ)
-    if file == null or file.get_length() > MAX_FILE_BYTES: return {}
-    var parser = JSON.new()
-    if parser.parse(file.get_as_text()) != OK: return {}
-    var parsed = parser.data
-    if not parsed is Dictionary or parsed.get("version") != VERSION or parsed.get("world_seed") != TerrainHeightSampler.WORLD_SEED or not SaveCodec.valid(parsed.get("state")): return {}
-    var state = SaveCodec.decode(parsed.state)
-    if not _valid_state(state): return {}
-    return state
+func _read_file(path: String) -> Dictionary: # Reuse the scene-independent verified reader.
+    return SaveFileJob.read_file(path) # Keep load and write validation identical.
 
-func _valid_state(s) -> bool:
-    if not s is Dictionary: return false
-    for key in ["position","yaw","pitch","inventory","equipment","vitals","time","time_speed","loot","shrines","starting_pair","active_pair"]:
-        if not s.has(key): return false
-    if not s.position is Vector3 or not s.inventory is Array or not s.equipment is String or not s.vitals is Array or (s.vitals.size() != 6 and s.vitals.size() != 7) or not s.loot is Dictionary or not s.shrines is Dictionary: return false
-    for n in [s.yaw,s.pitch,s.time,s.time_speed]+s.vitals:
-        if not (n is int or n is float) or not is_finite(n): return false
-    if s.time < 0 or s.time >= 24 or s.time_speed < 0 or s.time_speed > DayNightCycle.MAXIMUM_SPEED_MULTIPLIER: return false
-    for i in [0,2,4]:
-        if s.vitals[i+1] <= 0 or s.vitals[i] < 0 or s.vitals[i] > s.vitals[i+1]: return false
-    if s.has("city"):
-        if not s.city is Dictionary: return false
-        if not s.city.is_empty():
-            for key in ["cell","position","yaw","return_position","return_yaw"]:
-                if not s.city.has(key): return false
-            if not s.city.cell is Vector2i or not s.city.position is Vector3 or not s.city.return_position is Vector3: return false
-            if not s.city.position.is_finite() or not s.city.return_position.is_finite(): return false
-            if not (s.city.yaw is float or s.city.yaw is int) or not (s.city.return_yaw is float or s.city.return_yaw is int): return false
-            if not is_finite(s.city.yaw) or not is_finite(s.city.return_yaw): return false
-            var room = s.city.get("room",{})
-            if not room is Dictionary: return false
-            if not room.is_empty():
-                if not room.get("house") is String or not room.house.begins_with("CityHouse_") or "/" in room.house: return false
-                if not room.get("position") is Vector3 or not room.position.is_finite(): return false
-    for stack in s.inventory:
-        if not stack is InventoryStack: return false
-    for record in s.loot.values():
-        if not record is Dictionary or not record.get("inventory") is LootStorage or not record.get("health") is HealthState: return false
-        if record.has("affection") and not record.affection is AffectionState: return false
-        if record.has("npc_id") and not record.npc_id is String: return false
-        if record.has("npc_aggressors"):
-            if not record.npc_aggressors is Dictionary: return false
-            for target in record.npc_aggressors:
-                if not target is String or not record.npc_aggressors[target] is bool: return false
-        if record.has("npc_affection"):
-            if not record.npc_affection is Dictionary: return false
-            for target in record.npc_affection:
-                if not target is String or not record.npc_affection[target] is AffectionState: return false
-        if record.has("position") and not record.position is Vector3: return false
-    for key in s.shrines:
-        var shrine = s.shrines[key]
-        if not key is Vector2i or not shrine is Dictionary or shrine.get("id") != key or not shrine.get("position") is Vector3 or not shrine.get("landing") is Vector3 or not shrine.get("title") is String or not (shrine.get("yaw") is float or shrine.get("yaw") is int): return false
-    return (s.starting_pair == null or s.starting_pair is DungeonPairDefinition) and (s.active_pair == null or s.active_pair is DungeonPairDefinition)
+func _valid_state(state: Variant) -> bool: # Retain the existing validation entry point for callers.
+    return SaveFileJob.valid_state(state) # Delegate pure validation to the file component.
 
 func load_slot(slot: String = "current") -> bool:
+    finish_pending_save() # Finish pending writes before reading or reloading their owner.
     if slot not in ["current","quick"]: return _fail("Use current or quick as the save slot.")
     if not ready_to_save: return _fail("Wait for the world to finish loading.")
     if read_slot(slot).is_empty(): return _fail("No usable save in that slot.")

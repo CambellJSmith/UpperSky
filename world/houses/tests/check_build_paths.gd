@@ -3,6 +3,8 @@ extends SceneTree # Verify matching geometry from both procedural building paths
 class ImmediateScheduler extends GenerationScheduler: # Complete checkpoints immediately for deterministic comparison.
     func checkpoint(_owner: Node = null) -> bool: # Avoid frame timing affecting the geometry test.
         return true # Allow generation to continue.
+    func operation_checkpoint(_owner: Node = null) -> bool: # Keep this detached geometry comparison independent of rendered frames.
+        return true # Admit uploads immediately only in the deterministic fixture.
 
 func _initialize() -> void: # Start after class registration.
     _run.call_deferred() # Allow asynchronous generator calls.
