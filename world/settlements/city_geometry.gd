@@ -75,14 +75,13 @@ static func wall(root: Node3D, a: Vector2, b: Vector2, height: float, base: floa
         var merlon := box(root,Vector3(2.5,1.25,1.3),Vector3(point.x,base+height+.625,point.y),STONE)
         merlon.rotation.y = yaw
 
-static func exterior(definition: Dictionary) -> Node3D:
+static func exterior(definition: Dictionary, alignment: Dictionary = {}) -> Node3D: # Build city scenery from its prepared terrain fit.
     var root := Node3D.new()
     root.set_meta("city_definition",definition)
-    # A retained moat sits above the highest sampled site ground; no water clips into hills.
-    var base := 1.0
-    for house in definition.houses:
-        base = maxf(base,float(house.height)-float(definition.height)+1.0)
-    box(root,Vector3(122,base+2,122),Vector3(0,(base-2)*.5,0),DARK_STONE)
+    var base: float = float(alignment.get("base", 1.0)) # Keep isolated authored geometry usable while streamed cities use full-footprint fitting.
+    var bottom: float = float(alignment.get("bottom", -2.0)) # Extend actual streamed foundations below their deepest supporting ground.
+    root.set_meta("ground_alignment", alignment) # Preserve the construction snapshot for diagnostics and regression checks.
+    box(root,Vector3(122,base-bottom,122),Vector3(0,(base+bottom)*.5,0),DARK_STONE) # Build one solid retained foundation with matching primitive collision.
     box(root,Vector3(90,1.2,90),Vector3(0,base+.6,0),Color(.36,.39,.32))
     for side in [-1,1]:
         box(root,Vector3(12,.25,116),Vector3(side*52,base+.7,0),Color(.12,.36,.44),false)
@@ -100,9 +99,11 @@ static func exterior(definition: Dictionary) -> Node3D:
         box(root,Vector3(.25,1.2,19),Vector3(side*4.35,base+2,52),WOOD)
         var chain := box(root,Vector3(.12,.12,15),Vector3(side*4,base+5,49),Color(.18,.19,.21),false)
         chain.rotation.x = -.5
-    # A broad, gentle stone approach reaches natural ground outside the retained moat.
-    var ramp := box(root,Vector3(10,.5,30),Vector3(0,(base+1.6)*.5-.25,77),DARK_STONE)
-    ramp.rotation.x = atan2(base+1.6,30)
+    if alignment.has("approach"): # Use the real terrain-connected profile for streamed cities.
+        CityApproachGeometry.build(root, alignment.approach, DARK_STONE) # Keep the visible walking surface and collision identical.
+    else: # Retain isolated geometry construction for tools without a terrain dependency.
+        var ramp: MeshInstance3D = box(root,Vector3(10,.5,30),Vector3(0,(base+1.6)*.5-.25,77),DARK_STONE) # Provide the existing standalone approach proxy.
+        ramp.rotation.x = atan2(base+1.6,30) # Match the proxy's authored descent.
     # Cheap skyline proxies let roofs and the keep show above the exterior wall.
     # The populated, accessible streets are built only in the separate city space.
     for x in [-26,-10,10,26]:

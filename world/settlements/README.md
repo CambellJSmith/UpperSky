@@ -74,3 +74,11 @@ Run the focused buffer and hierarchy regression alongside the full city integrat
 godot --headless --path . --script res://world/settlements/tests/check_city_batch.gd
 godot --headless --path . --script res://world/settlements/tests/check_city.gd
 ```
+
+### Exterior Ground Alignment
+
+Streamed city exteriors fit the full retained footprint to the rendered terrain triangles in absolute world coordinates, including rotation. Foundation depth reaches below the lowest contained ground, and the moat platform clears the highest ground. Village house heights no longer lift the city exterior. Exact terrain vertices and clipped triangle edges determine the bounds rather than arbitrary sparse height samples.
+
+The stone approach connects the drawbridge to actual terrain at its road endpoint. Supported convex sections share their visible vertices with collision and clear intermediate terrain extrema. Fitting occurs once at construction; scheduled builds admit terrain queries through the existing generation budget. Batching and floating-origin translations retain the fitted geometry.
+
+Run `godot --headless --path . --script world/settlements/tests/check_city_ground_alignment.gd` for rotated full-footprint support, scheduled parity, entrance clearance, matching collision, batching and origin shifts.

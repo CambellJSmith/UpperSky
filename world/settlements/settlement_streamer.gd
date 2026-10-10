@@ -131,7 +131,8 @@ func _profile__build(job: Dictionary):
         root.set_meta("definition",definition)
         root.set_meta("next_house",0)
         if CityGeometry.is_city(definition):
-            root.add_child(CityGeometry.exterior(definition))
+            var alignment: Dictionary = CityGroundAlignment.new(_terrain, definition).fit() # Fit the complete exterior to rendered ground once.
+            root.add_child(CityGeometry.exterior(definition, alignment)) # Ground both the retained foundation and gate approach.
             CityStaticBatch.build_sync(root)
             root.set_meta("next_house",definition.houses.size())
         else:
@@ -228,7 +229,11 @@ func _build_incremental(job: Dictionary, scheduler: GenerationScheduler):
         root.set_meta("definition",definition)
         root.set_meta("next_house",0)
         if CityGeometry.is_city(definition):
-            root.add_child(CityGeometry.exterior(definition))
+            var alignment: Dictionary = await CityGroundAlignment.new(_terrain, definition).fit_incremental(scheduler) # Admit terrain fitting through the existing generation budget.
+            if alignment.is_empty(): # Discard cancelled construction before geometry allocation.
+                root.free() # Release the unfinished exterior root.
+                return # Leave the streaming slot available for a later valid request.
+            root.add_child(CityGeometry.exterior(definition, alignment)) # Use the same grounded geometry as immediate construction.
             if not await CityStaticBatch.build(root,get_tree(),scheduler,self):
                 root.free()
                 return
