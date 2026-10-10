@@ -15,6 +15,7 @@ var _combat_path: Array[Vector2] = []
 var _combat_path_timer: float = 0.0
 var health: DamageableHealth
 var _corpse_collider: CollisionShape3D
+var _dialogue_owner: WeakRef # Keep conversation ownership from retaining UI nodes.
 var world_position: Vector3
 var route: Array[Vector2] = []
 var role: String = "traveller"
@@ -360,6 +361,10 @@ func _profile__physics_process(delta: float) -> void:
         _play("idle")
         _combat_path.clear()
     _was_in_combat = fighting
+    if _dialogue_owner != null and _dialogue_owner.get_ref() != null and not fighting: # Hold a conversing NPC in place while combat still updates.
+        velocity = Vector3.ZERO # Stop route motion for the conversation.
+        _play("idle") # Keep the speaker visibly at rest.
+        return # Preserve the route waypoint until the conversation ends.
     if _visit_remaining > 0 and not fighting:
         _visit_remaining = maxf(0,_visit_remaining-delta)
         velocity = Vector3.ZERO
@@ -708,3 +713,20 @@ func trail_target(gap: float, follower: Vector2 = Vector2(INF,INF)) -> Vector2:
 func _exit_tree() -> void:
     NearbyActorIndex.invalidate() # Force subsequent perception queries to release this actor.
     if _space == null: persist_journey()
+
+func can_talk() -> bool: # Expose eligibility without leaking actor implementation to the dialogue UI.
+    return is_inside_tree() and is_visible_in_tree() and can_process() and health != null and not health.is_dead() and get_relationship_species() in ["human", "orc"] and not is_in_combat() and not is_instance_valid(ferry_riding) # Restrict conversations to living peaceful humanoids.
+
+func begin_dialogue(owner: Node) -> bool: # Reserve this speaker for one live conversation owner.
+    if not can_talk() or (_dialogue_owner != null and _dialogue_owner.get_ref() != null): # Reject unavailable or already occupied actors.
+        return false # Leave existing ownership intact.
+    _dialogue_owner = weakref(owner) # Allow automatic recovery if the interface disappears.
+    velocity = Vector3.ZERO # Stop current route movement immediately.
+    return true # Confirm ownership to the menu controller.
+
+func end_dialogue(owner: Node) -> void: # Release only the interface that owns this conversation.
+    if _dialogue_owner != null and _dialogue_owner.get_ref() == owner: # Protect a different active conversation.
+        _dialogue_owner = null # Resume ordinary NPC route updates.
+
+func get_dialogue_terrain() -> InfiniteTerrain: # Expose geographical context through a bounded public accessor.
+    return _terrain # Distinguish overworld actors from interior populations.
