@@ -18,6 +18,7 @@ const PLANK_WIDTH: float = .56 # Reduce narrow wooden siding strips.
 const SLATE_ROW_SPACING: float = .70 # Reduce small slate courses on pitched roofs.
 const SLATE_COLUMN_SPACING: float = .75 # Use broader slate pieces.
 const THATCH_COLUMN_SPACING: float = .50 # Reduce fine thatch bundles while retaining raised folds.
+const THATCH_HIP_COLUMN_SPACING: float = .65 # Simplify thatch pieces on the triangular hip ends.
 
 func build(recipe: HouseRecipe, collisions: bool = true) -> Node3D:
     _body = null
@@ -321,7 +322,7 @@ func _hip_ends(origin: Vector3, w: float, d: float, rise: float, thickness: floa
         for row in range(rows):
             var t0: float = float(row)/rows
             var t1: float = float(row+1)/rows
-            var count: int = maxi(1,ceili(w*(1.0-t0) / (THATCH_COLUMN_SPACING if prefix == "thatch" else SLATE_COLUMN_SPACING))) # Simplify hip-end pieces consistently with the main roof.
+            var count: int = maxi(1,ceili(w*(1.0-t0) / (THATCH_HIP_COLUMN_SPACING if prefix == "thatch" else SLATE_COLUMN_SPACING))) # Simplify hip-end pieces consistently with the main roof.
             for i in range(count):
                 var x0: float = -1.0+2.0*i/count
                 var x1: float = -1.0+2.0*(i+1)/count
@@ -485,7 +486,7 @@ func _hip_ends_incremental(origin: Vector3, w: float, d: float, rise: float, thi
             if not await scheduler.checkpoint(): return
             var t0: float = float(row)/rows
             var t1: float = float(row+1)/rows
-            var count: int = maxi(1,ceili(w*(1.0-t0) / (THATCH_COLUMN_SPACING if prefix == "thatch" else SLATE_COLUMN_SPACING))) # Simplify hip-end pieces consistently with the main roof.
+            var count: int = maxi(1,ceili(w*(1.0-t0) / (THATCH_HIP_COLUMN_SPACING if prefix == "thatch" else SLATE_COLUMN_SPACING))) # Simplify hip-end pieces consistently with the main roof.
             for i in range(count):
                 if not await scheduler.checkpoint(): return
                 var x0: float = -1.0+2.0*i/count
