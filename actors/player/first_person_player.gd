@@ -353,3 +353,6 @@ func _toggle_mouse_capture() -> void:
     Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func get_health_state() -> HealthState: return _vitals.get_health_state()
+
+func can_receive_radiant_encounter(terrain: InfiniteTerrain) -> bool: # Report suitable outdoor gameplay through a public player capability.
+    return _terrain == terrain and _gameplay_input_enabled and is_physics_processing() and not get_health_state().is_dead() and is_on_floor() and not _swimming_enabled and not _fly_mode_enabled and not _climbing_enabled and not is_instance_valid(water_transport) # Avoid encounters during menus, loading, interiors and special movement modes.

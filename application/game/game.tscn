@@ -33,6 +33,8 @@
 
 [ext_resource type="PackedScene" path="res://application/ui/dialogue/dialogue_interaction.tscn" id="38_dialogue"]
 
+[ext_resource type="Script" path="res://actors/npcs/encounters/radiant_event_director.gd" id="39_radiant"]
+
 [node name="Game" type="Node3D" unique_id=1438919531]
 script = ExtResource("1_game")
 
@@ -136,3 +138,6 @@ script = ExtResource("30_scheduler")
 script = ExtResource("29_save")
 
 [node name="Dialogue Interaction" parent="." instance=ExtResource("38_dialogue")]
+
+[node name="Radiant Events" type="Node3D" parent="."]
+script = ExtResource("39_radiant")
