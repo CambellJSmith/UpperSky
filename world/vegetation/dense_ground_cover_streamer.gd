@@ -49,6 +49,10 @@ var _requested_centre = Vector2(INF,INF)
 var _initialized: bool = false
 var _mask_revision := 0
 var _applied_mask_revision := -1
+var _cached_map_origin: Vector2 = Vector2(INF, INF) # Identifies the committed world grid independently of scene rebasing.
+var _cached_heights: PackedFloat32Array = PackedFloat32Array() # Retains terrain samples shared by consecutive carpet positions.
+var _cached_water: PackedFloat32Array = PackedFloat32Array() # Retains matching water samples without repeating procedural queries.
+var _dirty_mask_areas: Array[Rect2] = [] # Tracks road notifications that affect only part of the committed coverage map.
 
 func _ready() -> void:
 	var terrain_node: Node = get_node_or_null("../World/Terrain")
@@ -143,10 +147,14 @@ func _build_map_incremental(scheduler: GenerationScheduler):
 		var revision := _mask_revision
 		var origin = centre-Vector2(HALF_CARPET_SIZE+TERRAIN_MAP_BORDER,HALF_CARPET_SIZE+TERRAIN_MAP_BORDER)
 		var result = await _generate_map_incremental(origin,scheduler)
-		if result.is_empty(): break
+		if result.is_empty():
+			if centre != _requested_centre or revision != _mask_revision: continue # Restart cancelled work using the latest request.
+			break # Stop when the owner or scheduler closes.
 		if centre != _requested_centre or revision != _mask_revision: continue
 		if not await scheduler.checkpoint(self): break
+		if centre != _requested_centre or revision != _mask_revision: continue # Recheck freshness after the final scheduler yield.
 		_apply_carpet_origin(centre)
+		_commit_map_samples(origin, result.heights, result.water) # Publish sample caches only with a complete current map.
 		_terrain_image = result.image
 		_terrain_texture.update(_terrain_image)
 		_applied_mask_revision = revision
@@ -160,7 +168,9 @@ func _on_paths_ready(cell: Vector2i):
 	if not _requested_centre.is_finite(): return
 	var carpet := Rect2(_requested_centre-Vector2.ONE*(HALF_CARPET_SIZE+TERRAIN_MAP_BORDER),Vector2.ONE*(CARPET_SIZE+TERRAIN_MAP_BORDER*2))
 	var area := Rect2(Vector2(cell)*WorldPathNetwork.CHUNK_SIZE,Vector2.ONE*WorldPathNetwork.CHUNK_SIZE)
-	if carpet.intersects(area.grow(32)): _mask_revision += 1
+	if carpet.intersects(area.grow(32)):
+		if not _dirty_mask_areas.has(area.grow(32)): _dirty_mask_areas.append(area.grow(32)) # Coalesce repeated road notifications for the same neighborhood.
+		_mask_revision += 1 # Cancel any generation using an older road snapshot.
 
 func _reposition_after_origin_change() -> void:
 	var local_world_origin: Vector3 = _terrain.world_to_local_position(Vector3.ZERO)
@@ -274,6 +284,7 @@ func _refresh_terrain_map() -> void:
 	RuntimeProfiler.end(_profile_token)
 
 func _profile__refresh_terrain_map() -> void:
+	var image: Image = Image.create_empty(TERRAIN_MAP_RESOLUTION, TERRAIN_MAP_RESOLUTION, false, Image.FORMAT_RGF) # Stage synchronous updates without modifying reusable pixels.
 	var sample_count: int = TERRAIN_MAP_RESOLUTION * TERRAIN_MAP_RESOLUTION
 	var heights: PackedFloat32Array = PackedFloat32Array()
 	var water_levels: PackedFloat32Array = PackedFloat32Array()
@@ -289,8 +300,9 @@ func _profile__refresh_terrain_map() -> void:
 			var world_x: float = _terrain_map_world_origin.x + float(sample_x) * TERRAIN_VERTEX_SPACING
 			var index: int = sample_z * TERRAIN_MAP_RESOLUTION + sample_x
 			var position: Vector2 = Vector2(world_x, world_z)
-			var height: float = _terrain.get_height_at(position)
-			var water_level: float = _sample_water_level_cached(position, water_cache)
+			var cached_index: int = _cached_sample_index(position) # Locate overlap in the last committed world grid.
+			var height: float = _cached_heights[cached_index] if cached_index >= 0 else _terrain.get_height_at(position) # Sample only newly exposed terrain.
+			var water_level: float = _cached_water[cached_index] if cached_index >= 0 else _sample_water_level_cached(position, water_cache) # Reuse water from the same world position.
 			heights[index] = height
 			water_levels[index] = water_level
 			minimum_height = minf(minimum_height, height)
@@ -300,6 +312,11 @@ func _profile__refresh_terrain_map() -> void:
 		var previous_z: int = maxi(sample_z - 1, 0)
 		var next_z: int = mini(sample_z + 1, TERRAIN_MAP_RESOLUTION - 1)
 		for sample_x: int in range(TERRAIN_MAP_RESOLUTION):
+			var position: Vector2 = _terrain_map_world_origin + Vector2(sample_x, sample_z) * TERRAIN_VERTEX_SPACING # Identify this coverage sample in absolute space.
+			var cached_index: int = _cached_sample_index(position) # Find the matching committed pixel.
+			if _can_reuse_coverage(Vector2i(sample_x, sample_z), position, cached_index): # Preserve coverage only when its slope stencil and roads remain unchanged.
+				image.set_pixel(sample_x, sample_z, _terrain_image.get_pixel(cached_index % TERRAIN_MAP_RESOLUTION, floori(float(cached_index) / TERRAIN_MAP_RESOLUTION))) # Copy unchanged coverage without biome or clearing queries.
+				continue # Skip expensive unchanged coverage work.
 			var previous_x: int = maxi(sample_x - 1, 0)
 			var next_x: int = mini(sample_x + 1, TERRAIN_MAP_RESOLUTION - 1)
 			var index: int = sample_z * TERRAIN_MAP_RESOLUTION + sample_x
@@ -328,8 +345,10 @@ func _profile__refresh_terrain_map() -> void:
 			coverage *= BiomeProfile.vegetation_weight(world_position)
 			if _camp_sampler.is_clearing(world_position) or _settlement_sampler.is_clearing(world_position,PATCH_SPREAD_RADIUS+TERRAIN_VERTEX_SPACING*.5) or WayshrineSampler.for_terrain(_terrain).is_clearing(world_position,PATCH_SPREAD_RADIUS):
 				coverage = 0.0
-			_terrain_image.set_pixel(sample_x, sample_z, Color(height, coverage, 0.0, 1.0))
+			image.set_pixel(sample_x, sample_z, Color(height, coverage, 0.0, 1.0))
 
+	_commit_map_samples(_terrain_map_world_origin, heights, water_levels) # Retain the completed synchronous terrain grid.
+	_terrain_image = image # Publish the complete staged coverage map.
 	_terrain_texture.update(_terrain_image)
 	_update_tile_bounds(minimum_height, maximum_height)
 
@@ -436,12 +455,15 @@ func _create_noise(seed_offset: int, frequency: float, octaves: int, gain: float
 	return noise
 
 func _generate_map_incremental(origin: Vector2, scheduler: GenerationScheduler) -> Dictionary:
+	var requested_centre: Vector2 = _requested_centre # Capture the request used by all yielded stages.
+	var requested_revision: int = _mask_revision # Capture road state before preparing the map.
 	var last_point = origin+Vector2.ONE*(TERRAIN_MAP_RESOLUTION-1)*TERRAIN_VERTEX_SPACING
 	var shrine_first = Vector2i(floori(origin.x/WayshrineSampler.CELL_SIZE),floori(origin.y/WayshrineSampler.CELL_SIZE))
 	var shrine_last = Vector2i(floori(last_point.x/WayshrineSampler.CELL_SIZE),floori(last_point.y/WayshrineSampler.CELL_SIZE))
 	for z in range(shrine_first.y,shrine_last.y+1):
 		for x in range(shrine_first.x,shrine_last.x+1):
 			await WayshrineSampler.for_terrain(_terrain).sample_cell_incremental(Vector2i(x,z),scheduler)
+			if requested_centre != _requested_centre or requested_revision != _mask_revision: return {} # Stop obsolete shrine preparation before terrain sampling.
 	var image = Image.create_empty(TERRAIN_MAP_RESOLUTION,TERRAIN_MAP_RESOLUTION,false,Image.FORMAT_RGF)
 	var sample_count: int = TERRAIN_MAP_RESOLUTION * TERRAIN_MAP_RESOLUTION
 	var heights: PackedFloat32Array = PackedFloat32Array()
@@ -453,26 +475,36 @@ func _generate_map_incremental(origin: Vector2, scheduler: GenerationScheduler) 
 	var maximum_height: float = -INF
 
 	for sample_z: int in range(TERRAIN_MAP_RESOLUTION):
-		if not await scheduler.checkpoint(): return {}
+		if not await scheduler.checkpoint(self): return {} # Stop work for removed or paused owners.
+		if requested_centre != _requested_centre or requested_revision != _mask_revision: return {} # Cancel obsolete work before another sample.
 		var world_z: float = origin.y + float(sample_z) * TERRAIN_VERTEX_SPACING
 		for sample_x: int in range(TERRAIN_MAP_RESOLUTION):
-			if not await scheduler.checkpoint(): return {}
+			if not await scheduler.checkpoint(self): return {} # Preserve scheduler ownership during sampling.
+			if requested_centre != _requested_centre or requested_revision != _mask_revision: return {} # Abandon stale requests before further sampling.
 			var world_x: float = origin.x + float(sample_x) * TERRAIN_VERTEX_SPACING
 			var index: int = sample_z * TERRAIN_MAP_RESOLUTION + sample_x
 			var position: Vector2 = Vector2(world_x, world_z)
-			var height: float = _terrain.get_height_at(position)
-			var water_level: float = _sample_water_level_cached(position, water_cache)
+			var cached_index: int = _cached_sample_index(position) # Locate overlap in the last committed world grid.
+			var height: float = _cached_heights[cached_index] if cached_index >= 0 else _terrain.get_height_at(position) # Sample only newly exposed terrain.
+			var water_level: float = _cached_water[cached_index] if cached_index >= 0 else _sample_water_level_cached(position, water_cache) # Reuse water from the same world position.
 			heights[index] = height
 			water_levels[index] = water_level
 			minimum_height = minf(minimum_height, height)
 			maximum_height = maxf(maximum_height, height)
 
 	for sample_z: int in range(TERRAIN_MAP_RESOLUTION):
-		if not await scheduler.checkpoint(): return {}
+		if not await scheduler.checkpoint(self): return {} # Preserve scheduler ownership during sampling.
+		if requested_centre != _requested_centre or requested_revision != _mask_revision: return {} # Abandon stale requests before further sampling.
 		var previous_z: int = maxi(sample_z - 1, 0)
 		var next_z: int = mini(sample_z + 1, TERRAIN_MAP_RESOLUTION - 1)
 		for sample_x: int in range(TERRAIN_MAP_RESOLUTION):
-			if not await scheduler.checkpoint(): return {}
+			if not await scheduler.checkpoint(self): return {} # Preserve scheduler ownership during sampling.
+			if requested_centre != _requested_centre or requested_revision != _mask_revision: return {} # Abandon stale requests before further sampling.
+			var position: Vector2 = origin + Vector2(sample_x, sample_z) * TERRAIN_VERTEX_SPACING # Identify this coverage sample in absolute space.
+			var cached_index: int = _cached_sample_index(position) # Find the matching committed pixel.
+			if _can_reuse_coverage(Vector2i(sample_x, sample_z), position, cached_index): # Preserve coverage only when its slope stencil and roads remain unchanged.
+				image.set_pixel(sample_x, sample_z, _terrain_image.get_pixel(cached_index % TERRAIN_MAP_RESOLUTION, floori(float(cached_index) / TERRAIN_MAP_RESOLUTION))) # Copy unchanged coverage without biome or clearing queries.
+				continue # Skip expensive unchanged coverage work.
 			var previous_x: int = maxi(sample_x - 1, 0)
 			var next_x: int = mini(sample_x + 1, TERRAIN_MAP_RESOLUTION - 1)
 			var index: int = sample_z * TERRAIN_MAP_RESOLUTION + sample_x
@@ -503,7 +535,7 @@ func _generate_map_incremental(origin: Vector2, scheduler: GenerationScheduler) 
 				coverage = 0.0
 			image.set_pixel(sample_x, sample_z, Color(height, coverage, 0.0, 1.0))
 
-	return {"image":image,"minimum":minimum_height,"maximum":maximum_height}
+	return {"image":image,"minimum":minimum_height,"maximum":maximum_height,"heights":heights,"water":water_levels}
 
 func _create_tiles_incremental(scheduler: GenerationScheduler) -> void:
 	_lod_meshes = [_create_patch_mesh(56),_create_patch_mesh(28),_create_patch_mesh(7)]
@@ -564,3 +596,26 @@ func _initialize_tiles_incremental(scheduler: GenerationScheduler):
 	_recenter_if_needed(true)
 	_initialized = true
 	_tile_building = false
+
+func _cached_sample_index(position: Vector2) -> int: # Finds a committed sample at the same absolute world position.
+	if _cached_heights.is_empty(): return -1 # Reject reuse before the first completed map.
+	var coordinate: Vector2 = (position - _cached_map_origin) / TERRAIN_VERTEX_SPACING # Convert absolute position into committed grid space.
+	var cell: Vector2i = Vector2i(coordinate.round()) # Resolve an aligned sample coordinate.
+	if not coordinate.is_equal_approx(Vector2(cell)): return -1 # Reject unaligned origins rather than reusing neighboring samples.
+	if cell.x < 0 or cell.y < 0 or cell.x >= TERRAIN_MAP_RESOLUTION or cell.y >= TERRAIN_MAP_RESOLUTION: return -1 # Restrict reuse to overlap.
+	return cell.y * TERRAIN_MAP_RESOLUTION + cell.x # Return the packed committed index.
+
+func _can_reuse_coverage(cell: Vector2i, position: Vector2, cached_index: int) -> bool: # Reuses coverage only when the complete derivative stencil still matches.
+	if cached_index < 0: return false # Generate newly exposed coverage normally.
+	var previous: Vector2i = Vector2i(cached_index % TERRAIN_MAP_RESOLUTION, floori(float(cached_index) / TERRAIN_MAP_RESOLUTION)) # Recover the committed coverage coordinate.
+	if (cell.x == 0) != (previous.x == 0) or (cell.x == TERRAIN_MAP_RESOLUTION - 1) != (previous.x == TERRAIN_MAP_RESOLUTION - 1): return false # Refresh changed horizontal edge derivatives.
+	if (cell.y == 0) != (previous.y == 0) or (cell.y == TERRAIN_MAP_RESOLUTION - 1) != (previous.y == TERRAIN_MAP_RESOLUTION - 1): return false # Refresh changed vertical edge derivatives.
+	for area: Rect2 in _dirty_mask_areas: # Check coalesced road dirt against this absolute sample.
+		if area.has_point(position): return false # Refresh only coverage affected by road publication.
+	return true # Preserve the existing terrain and vegetation result.
+
+func _commit_map_samples(origin: Vector2, heights: PackedFloat32Array, water: PackedFloat32Array) -> void: # Publishes complete sample state alongside its coverage image.
+	_cached_map_origin = origin # Bind reused samples to their absolute world origin.
+	_cached_heights = heights # Retain the completed terrain grid.
+	_cached_water = water # Retain the matching water grid.
+	_dirty_mask_areas.clear() # Consume notifications only after a complete current map is installed.
