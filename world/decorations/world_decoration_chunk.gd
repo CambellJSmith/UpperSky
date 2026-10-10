@@ -1,6 +1,10 @@
 extends StaticBody3D # Streams one chunk of faceted trees and boulders with distance LOD and low-overhead nearby collision.
 class_name WorldDecorationChunk # Makes decoration chunks available to the independent decoration streamer.
 
+var _candidates: Array[WorldDecorationPlacement] = [] # Retains terrain-valid placements independently of current roads.
+var _candidate_visibility: PackedByteArray = PackedByteArray() # Tracks road-dependent membership without resampling placements.
+var _world_origin: Vector2 = Vector2.ZERO # Anchors retained candidates to absolute road space.
+var _paths_changed: bool = false # Tracks whether candidate filtering changed visible membership.
 var _placements: Array[WorldDecorationPlacement] = [] # Retains deterministic object transforms for visual LOD rebuilding and nearby collision.
 var _mesh_library: WorldDecorationMeshLibrary # Supplies shared non-cubic meshes and reusable primitive collision resources.
 var _visual_nodes: Array[MultiMeshInstance3D] = [] # Stores the small set of draw-batched visual nodes owned by this chunk.
@@ -8,8 +12,16 @@ var _collision_shape_owners: Array[int] = [] # Stores shape-owner IDs instead of
 var _lod_level: int = -1 # Stores the active visual detail tier and forces initial visual construction.
 var _collision_active: bool = false # Tracks whether physical interaction is currently installed.
 
-func configure(placements: Array[WorldDecorationPlacement], mesh_library: WorldDecorationMeshLibrary, lod_level: int) -> void: # Stores generated placements and creates draw-batched visuals at the requested detail tier.
-    _placements = placements # Retains stable transforms so visual LOD and collision always describe the same objects.
+func configure(placements: Array[WorldDecorationPlacement], mesh_library: WorldDecorationMeshLibrary, lod_level: int, world_origin: Vector2 = Vector2.ZERO, road_query: Callable = Callable()) -> void: # Stores generated placements and creates draw-batched visuals at the requested detail tier.
+    _candidates = placements # Retain expensive terrain and density results across road updates.
+    _world_origin = world_origin # Preserve absolute coordinates through scene rebasing.
+    _candidate_visibility.resize(placements.size()) # Allocate compact retained membership.
+    _candidate_visibility.fill(1) # Begin with every candidate eligible for scenery.
+    if road_query.is_valid(): # Apply already completed roads during initial installation.
+        var area: Rect2 = Rect2(world_origin, Vector2.ONE * TerrainConfiguration.CHUNK_SIZE) # Cover every candidate owned by this chunk.
+        for index: int in range(_candidates.size()): refresh_path_candidate(index, area, road_query) # Filter current road geometry without terrain regeneration.
+    _placements = _visible_placements() # Select the initial visible and physical membership.
+    _paths_changed = false # Mark initial filtering as consumed before creating visuals.
     _mesh_library = mesh_library # Retains shared resource access without duplicating geometry or primitive shapes per chunk.
     _lod_level = clampi(lod_level, WorldDecorationMeshLibrary.LOD_NEAR, WorldDecorationMeshLibrary.LOD_FAR) # Stores a valid initial distance tier.
     _create_visuals() # Batches faceted trees and boulders into a small number of MultiMeshes.
@@ -103,22 +115,65 @@ func _clear_visuals() -> void: # Releases the current LOD's small set of visual 
 func _create_collisions() -> void: # Creates dense nearby collision with shared Shape3D resources and no CollisionShape3D child nodes.
     if not _collision_shape_owners.is_empty() or _mesh_library == null: # Detects existing collision or unavailable shared resources.
         return # Avoids duplicate shape owners and invalid setup.
-    for placement: WorldDecorationPlacement in _placements:
-        if placement.kind == WorldDecorationPlacement.Kind.TREE:
-            for part in _mesh_library.get_tree_collision_parts(placement.variant):
-                var owner_id: int = create_shape_owner(placement)
-                shape_owner_add_shape(owner_id,part["shape"])
-                shape_owner_set_transform(owner_id,placement.transform*part["transform"])
-                _collision_shape_owners.append(owner_id)
-        else:
-            var owner_id: int = create_shape_owner(placement)
-            var shape := SphereShape3D.new()
-            shape.radius = _mesh_library.get_boulder_collision_radius(placement.variant)
-            shape_owner_add_shape(owner_id,shape)
-            shape_owner_set_transform(owner_id,placement.transform)
-            _collision_shape_owners.append(owner_id)
+    for placement: WorldDecorationPlacement in _placements: _add_placement_collision(placement) # Install collision only for current road-safe candidates.
 
 func _clear_collisions() -> void: # Removes all nearby object collision while preserving batched visuals.
     for owner_id: int in _collision_shape_owners: # Visits every currently active tree or rock shape owner.
         remove_shape_owner(owner_id) # Removes its shapes and transform from the physics body immediately.
     _collision_shape_owners.clear() # Resets the active set for future re-entry into the collision radius.
+
+func candidate_count() -> int: # Expose retained filtering work without mutable placement access.
+    return _candidates.size() # Report bounded candidate work for the streamer.
+
+func refresh_path_candidate(index: int, area: Rect2, query: Callable) -> void: # Update one candidate only inside a coalesced road neighborhood.
+    var placement: WorldDecorationPlacement = _candidates[index] # Retrieve immutable procedural placement data.
+    var position: Vector2 = _world_origin + Vector2(placement.transform.origin.x, placement.transform.origin.z) # Resolve absolute road space independently of scene rebasing.
+    if not area.has_point(position): return # Skip unaffected world positions.
+    var limit: float = WorldDecorationSampler.TREE_PATH_CLEAR_THRESHOLD if placement.kind == WorldDecorationPlacement.Kind.TREE else WorldDecorationSampler.BOULDER_PATH_CLEAR_THRESHOLD # Preserve each family's original road clearance.
+    var enabled: int = int(float(query.call(position)) <= limit) # Determine current road-dependent membership.
+    if enabled == _candidate_visibility[index]: return # Avoid rebuilding unchanged scenery.
+    _candidate_visibility[index] = enabled # Retain the new road state.
+    _paths_changed = true # Request one visual and physical membership update.
+
+func paths_need_commit() -> bool: # Let the streamer avoid engine operations for unchanged road masks.
+    return _paths_changed # Report pending visible membership changes.
+
+func _visible_placements() -> Array[WorldDecorationPlacement]: # Derive submitted membership from stable candidates.
+    var visible_placements: Array[WorldDecorationPlacement] = [] # Preserve deterministic accepted order.
+    for index: int in range(_candidates.size()): # Visit candidates without terrain or density queries.
+        if _candidate_visibility[index] != 0: visible_placements.append(_candidates[index]) # Retain only currently road-safe objects.
+    return visible_placements # Return matching rendering and collision membership.
+
+func commit_path_visibility() -> void: # Install changed road membership without replacing the chunk or procedural sampling.
+    if not _paths_changed: return # Avoid unchanged engine work.
+    _placements = _visible_placements() # Keep stable transforms for the surviving scenery.
+    _clear_visuals() # Release only rendering batches rather than the complete streamed chunk.
+    _create_visuals() # Install the current road-safe draw groups.
+    if _collision_active: # Keep physical membership synchronized with road-cleared visuals.
+        var retained: Dictionary[int, bool] = {} # Index surviving placements without repeated array searches.
+        for placement: WorldDecorationPlacement in _placements: retained[placement.get_instance_id()] = true # Mark surviving collider owners.
+        for owner_id: int in _collision_shape_owners.duplicate(): # Visit current shape owners without mutating the iterator.
+            var placement: WorldDecorationPlacement = shape_owner_get_owner(owner_id) as WorldDecorationPlacement # Recover the stable candidate owning this shape.
+            if retained.has(placement.get_instance_id()): continue # Preserve collision resources for unaffected scenery.
+            remove_shape_owner(owner_id) # Remove only road-obstructing physical shapes.
+            _collision_shape_owners.erase(owner_id) # Keep owner tracking aligned with installed physics.
+        var installed: Dictionary[int, bool] = {} # Identify placements that already retain physical shapes.
+        for owner_id: int in _collision_shape_owners: installed[shape_owner_get_owner(owner_id).get_instance_id()] = true # Index surviving physical ownership.
+        for placement: WorldDecorationPlacement in _placements: # Restore candidates if a changed road mask admits them again.
+            if not installed.has(placement.get_instance_id()): _add_placement_collision(placement) # Install only newly admitted collider owners.
+    _paths_changed = false # Mark road membership as installed.
+
+func _add_placement_collision(placement: WorldDecorationPlacement) -> void: # Installs physical interaction for one newly visible candidate.
+    if placement.kind == WorldDecorationPlacement.Kind.TREE: # Use the shared tree collision parts.
+        for part: Dictionary in _mesh_library.get_tree_collision_parts(placement.variant): # Visit authored primitive parts.
+            var owner_id: int = create_shape_owner(placement) # Bind each part to its retained placement.
+            shape_owner_add_shape(owner_id, part["shape"]) # Reuse authored shared shape resources.
+            shape_owner_set_transform(owner_id, placement.transform * part["transform"]) # Match the existing visual transform.
+            _collision_shape_owners.append(owner_id) # Retain the installed physical owner.
+    else: # Install the rounded rock's primitive collision.
+        var owner_id: int = create_shape_owner(placement) # Bind collision to the retained rock candidate.
+        var shape: SphereShape3D = SphereShape3D.new() # Preserve the existing variant-specific rock collision.
+        shape.radius = _mesh_library.get_boulder_collision_radius(placement.variant) # Match the authored rock footprint.
+        shape_owner_add_shape(owner_id, shape) # Install the physical primitive.
+        shape_owner_set_transform(owner_id, placement.transform) # Preserve the candidate's orientation and scale.
+        _collision_shape_owners.append(owner_id) # Retain the installed physical owner.
