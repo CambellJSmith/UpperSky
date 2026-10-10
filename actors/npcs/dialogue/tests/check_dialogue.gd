@@ -120,6 +120,36 @@ func run() -> void: # Verify factual phrases and actual dialogue interaction.
     npc.model_index = 3 # Exercise a non-human and non-orc actor.
     assert(not interaction.open_dialogue(npc)) # Reject unsupported species without changing input.
     npc.model_index = 0 # Restore the original human model.
+    var inventory: PlayerInventory = player.get_node("PlayerInventory") as PlayerInventory # Exercise the real player's purchase and gift flow.
+    assert(interaction.open_encounter(npc, "boot_money")) # Open a stock-backed sale in the authored menu.
+    assert(menu._accept.text.contains("5 Coins") and menu._accept.text.contains("Bread")) # Show exact goods and price before consent.
+    menu._accept.pressed.emit() # Attempt the purchase without sufficient currency.
+    assert(menu._encounter.visible and not player._gameplay_input_enabled) # Keep failed purchases pending in the menu.
+    assert(response.text.contains("Need") and inventory.get_total_item_count() == 0) # Explain missing funds without delivering goods.
+    assert(inventory.try_add_item(&"coins", "Coins", 0.01, 5, InventoryCategory.Type.MISC)) # Supply the actual quoted currency.
+    menu._accept.pressed.emit() # Accept through the native button signal.
+    assert(menu._goodbye.visible and not menu._encounter.visible) # Hold a readable completion screen after settlement.
+    assert(RadiantOfferService.find_item(inventory, &"bread").get_quantity() == 3) # Deliver the real purchased bread.
+    var purchase_revision: int = inventory.get_revision() # Snapshot the completed purchase.
+    menu._accept.pressed.emit() # Reproduce a stale repeated acceptance signal.
+    assert(inventory.get_revision() == purchase_revision) # Prevent a duplicate payout or charge.
+    menu._goodbye.pressed.emit() # Acknowledge the completed exchange.
+    assert(player._gameplay_input_enabled and npc.get_affection() > NpcCombat.HOSTILE_THRESHOLD) # Restore gameplay with the merchant still peaceful.
+    assert(interaction.open_dialogue(npc)) # Restore ordinary conversations after an event.
+    assert(menu._topics.visible and menu._goodbye.text == "Goodbye") # Reset the authored normal topic and exit controls.
+    interaction.close_dialogue() # Release the merchant before testing a gift giver.
+    var giver: Villager = Villager.new() # Provide a separate one-time gift identity.
+    giver.configure(terrain, {"route": route, "seed": 930003, "model": 2, "role": "radiant_challenger", "start": 0}) # Exercise orc gifts through the normal actor composition.
+    game.add_child(giver) # Initialize the actual gift giver.
+    giver.set_physics_process(false) # Hold its position during consent checks.
+    assert(interaction.open_encounter(giver, "shared_lunch")) # Present the free-food invitation.
+    menu._decline.pressed.emit() # Refuse the pending gift.
+    assert(inventory.get_revision() == purchase_revision and player._gameplay_input_enabled) # Transfer nothing on refusal and restore controls.
+    assert(interaction.open_encounter(giver, "shared_lunch")) # Retry the same stable uncompleted gift quote.
+    menu._accept.pressed.emit() # Explicitly accept the free goods.
+    assert(RadiantOfferService.find_item(inventory, &"bread").get_quantity() == 5) # Add only the promised two free bread.
+    menu._goodbye.pressed.emit() # Release the completed friendly encounter.
+    giver.free() # Release the controlled gift actor.
     assert(interaction.open_dialogue(npc)) # Start another live conversation.
     npc.health.apply_damage(100000) # Exercise an actual death during the exchange.
     interaction._process(0.2) # Validate the dead conversation target.

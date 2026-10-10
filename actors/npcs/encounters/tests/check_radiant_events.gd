@@ -56,6 +56,7 @@ func run() -> void: # Exercise production actor movement and authored consent co
     game.add_child(director) # Resolve the participant and dialogue through normal composition.
     director.set_process(false) # Drive bounded scheduling updates explicitly.
     director._rng.seed = 1234 # Keep placement proposals reproducible in the regression.
+    director._event_bag.assign([RadiantEventPhrases.BATTLE_CHALLENGE]) # Keep the movement regression focused on battle consent.
     for frame: int in range(20): # Allow player-floor collision and grounding to settle.
         await physics_frame # Register actual grounded player state.
     assert(not LootSession.records.has("npc:radiant_challenger:0:expired")) # Require expired saved event records to be cleaned after startup.

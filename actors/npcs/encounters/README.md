@@ -11,3 +11,11 @@ The challenge begins at neutral affection. Accept explicitly sets AffectionState
 `radiant_event_phrases.gd` owns authored event content and acceptance effects. Opening text supports the existing DialogueContext variables. `radiant_spawn_sampler.gd` owns placement validation; `radiant_event_director.gd` owns scheduling and lifecycle. Event actors use session-local identities with existing loot and affection records, and are not reconstructed as an active radiant encounter after loading a save. Retired actors release their transient social records; expired saved radiant records are discarded after startup so repeated events do not grow unreachable record storage.
 
 Regression: `godot --headless --path . --script actors/npcs/encounters/tests/check_radiant_events.gd`. The controlled world has real registered collision and runs real Villager movement; only mouse-capture readiness uses a headless display adapter. Interactive presentation and physical controller operation still require an in-game check.
+
+## Offers, Gifts And Help
+
+The shuffled encounter pool now includes the battle challenge plus sixteen peaceful encounters. Every type appears once per shuffled round, with no immediate repeats across rounds. Merchants sell bread for new boots, a pickaxe for wagon repairs, a sword for a journey home, a knife for an upgrade, and linen for tent supplies. Buyers purchase food or cloth; camp cooks and tailors barter those goods. Generous travellers offer bread, a knife, coins or cloth freely. Other travellers ask for coins or food, or share real nearby-city information.
+
+The consent button names the exact goods and price. Accepted exchanges move real items between player and NPC inventories once, validate full payment and final carrying weight after outgoing goods leave, and leave failed offers pending with an explanation. Friendly outcomes increase affection and show a confirmation before the NPC departs peacefully. Only accepting a battle challenge makes the NPC hostile. Declining or closing an unfinished offer transfers nothing. Equipment rewards use the existing equipment catalogue.
+
+Run `godot --headless --path . --script actors/npcs/encounters/tests/check_radiant_offers.gd` to check all peaceful transactions, insufficient funds, capacity rejection, net-weight barter, duplicate payout prevention and shuffled encounter coverage.
