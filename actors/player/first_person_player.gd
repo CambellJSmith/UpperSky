@@ -166,8 +166,9 @@ func _update_water_state() -> void:
         return
     var player_world_position: Vector3 = _terrain.local_to_world_position(global_position)
     var horizontal_position: Vector2 = Vector2(player_world_position.x, player_world_position.z)
-    var water_exists: bool = _terrain.has_water_at(horizontal_position)
-    _current_water_level = _terrain.get_water_level_at(horizontal_position)
+    var water: Dictionary = _terrain.get_water_sample_at(horizontal_position) # Samples occupancy and elevation from one authoritative triangle query.
+    var water_exists: bool = bool(water.present) # Establishes actual water before testing body immersion.
+    _current_water_level = float(water.surface_height) # Uses the actual occupied surface instead of a predicted shoreline elevation.
     var body_sample_height: float = player_world_position.y + SWIM_BODY_SAMPLE_HEIGHT
     _set_swimming_enabled(water_exists and body_sample_height < _current_water_level)
 

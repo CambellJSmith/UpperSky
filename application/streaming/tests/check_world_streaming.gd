@@ -36,6 +36,10 @@ func run():
     var barrier := BarrierJob.new()
     assert(scheduler.submit(scheduler,barrier.generate,func(_data): pass,true))
     var spawned := await wait_until(func(): return player.is_physics_processing() and terrain._chunks.size()>=9,10)
+    var spawn_world: Vector3 = terrain.local_to_world_position(player.global_position) # Verifies the actual collision-backed starting shoreline.
+    var spawn_point: Vector2 = Vector2(spawn_world.x, spawn_world.z) # Samples authoritative absolute water coordinates.
+    assert(not terrain.has_water_at(spawn_point), "Starting player must stand on dry planned terrain") # Prevents an overflooded or swimming startup.
+    assert(spawn_point.distance_to(WaterBodyPlan.STARTING_LAKE_CENTRE) < WaterBodyPlan.STARTING_LAKE_RADIUS + WaterBodyPlan.SHORE_WIDTH, "Starting shore must use its explicit basin") # Keeps the initial biome and its streaming workload deterministic.
     player.set_fly_mode_enabled(true)
     var populated := await wait_until(func():
         var objects := counts(decorations)

@@ -12,12 +12,12 @@ var journey_job: FerryJourneyJob
 var journey_pending: Array[FerryCrossing] = []
 var centre := Vector2i(2147483647,2147483647)
 var elapsed := 0.0
-var cache_directory := "user://ferries/v5_%d/"%TerrainHeightSampler.WORLD_SEED
+var cache_directory := "user://ferries/v6_%d/"%TerrainHeightSampler.WORLD_SEED # Invalidates docks and journeys built against unplanned water.
 
 func initialize(source: InfiniteTerrain, character: FirstPersonPlayer):
     terrain = source
     player = character
-    cache_directory = "user://ferries/v5_%d_%s/"%[TerrainHeightSampler.WORLD_SEED,"seamless" if source is SeamlessInfiniteTerrain else "tiered"]
+    cache_directory = "user://ferries/v6_%d_%s/"%[TerrainHeightSampler.WORLD_SEED,"seamless" if source is SeamlessInfiniteTerrain else "tiered"] # Keeps dock and journey reconstruction aligned with the new water generation.
 
 func _process(delta: float):
     if terrain == null or player == null or terrain.get_loaded_chunk_count()==0 or not terrain.is_visible_in_tree(): return

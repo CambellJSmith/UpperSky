@@ -20,7 +20,7 @@ func run() -> void: # Exercise the reported starting-region mismatch through pro
         assert(is_equal_approx(sampler.sample_water_level(point.x, point.y), unchanged[point]), "Distant geological water changed") # Restrict the correction to terrain's starting-region transition.
     var river: Dictionary = BiomeProfile.region(Vector2i(-1, 0)) # Preserve authored biome river reaches.
     for offset: float in [-600.0, 0.0, 600.0]: # Visit each flat river reach away from the spawn blend.
-        var point: Vector2 = river.centre + Vector2(0, offset) # Resolve the authored river centerline.
+        var point: Vector2 = river.centre + Vector2(BiomeProfile.river_x(offset, river.phase), offset) # Resolve the authored river centerline.
         var expected: float = river.sea + (64.0 if offset < -320.0 else (32.0 if offset < 320.0 else 0.0)) # Preserve the established cascade levels.
         assert(is_equal_approx(terrain.get_water_level_at(point), expected)) # Keep biome-specific water elevations intact.
     terrain.free() # Release cached terrain and water queries.

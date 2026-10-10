@@ -1,62 +1,25 @@
-extends InfiniteTerrain
-class_name SeamlessInfiniteTerrain
+extends InfiniteTerrain # Extends streaming terrain with planned basin queries.
+class_name SeamlessInfiniteTerrain # Retains the production terrain scene interface.
 
-# Water queries use the same flat cell level and clipped shoreline as the mesh.
+var _water_query_service: WaterQueryService # Owns the authoritative gameplay corner cache.
 
-const SEAMLESS_WATER_PRESENCE_EPSILON: float = 0.02
-const SEAMLESS_INVALID_WATER_CELL: Vector2i = Vector2i(2_147_483_647, 2_147_483_647)
+func _ready() -> void: # Installs production terrain and water services after base initialization.
+    super() # Initializes the inherited streaming controller.
+    _height_sampler = SeamlessTerrainHeightSampler.new() # Selects final biome and basin terrain.
+    _mesh_builder = TerrainMeshBuilder.new(_height_sampler, _terrain_material, self) # Builds visible ground from that final terrain.
+    _water_level_sampler = SeamlessTerrainWaterLevelSampler.new() # Selects the shared planned water elevation provider.
+    _water_mesh_builder = SeamlessTerrainWaterMeshBuilder.new(_height_sampler, _water_level_sampler, _water_material) # Clips visible water against final ground and body boundaries.
+    _water_query_service = WaterQueryService.new(_height_sampler, get_height_at) # Reuses world corner heights for gameplay queries.
 
-var _seamless_water_query_cell_coordinate: Vector2i = SEAMLESS_INVALID_WATER_CELL
-var _seamless_water_cell_level: float = 0.0
-var _seamless_terrain_top_left_height: float = 0.0
-var _seamless_terrain_top_right_height: float = 0.0
-var _seamless_terrain_bottom_left_height: float = 0.0
-var _seamless_terrain_bottom_right_height: float = 0.0
+func get_water_sample_at(world_position: Vector2) -> Dictionary: # Returns authoritative absolute-world water metadata.
+    if _water_query_service == null: # Supports detached terrain fixtures before scene initialization.
+        _water_query_service = WaterQueryService.new(_height_sampler, get_height_at) # Creates the same corner cache used by a live world.
+    return _water_query_service.sample(world_position) # Delegates presence and depth to the shared triangle query.
 
-func _ready() -> void:
-    super()
-    _height_sampler = SeamlessTerrainHeightSampler.new()
-    _mesh_builder = TerrainMeshBuilder.new(_height_sampler, _terrain_material,self)
-    _water_level_sampler = SeamlessTerrainWaterLevelSampler.new()
-    _water_mesh_builder = SeamlessTerrainWaterMeshBuilder.new(_height_sampler, _water_level_sampler, _water_material)
+func get_water_level_at(world_position: Vector2) -> float: # Provides planned elevation for conservative shore placement.
+    return _water_level_sampler.sample_water_level(world_position.x, world_position.y) # Reads the shared plan without recomputing ground corners.
 
-func get_water_level_at(world_position: Vector2) -> float:
-    _update_seamless_water_query_cache(world_position)
-    return _seamless_water_cell_level
-
-func has_water_at(world_position: Vector2) -> bool:
-    _update_seamless_water_query_cache(world_position)
-    var rendered_water_height: float = _seamless_water_cell_level
-    var rendered_terrain_height: float = _sample_cached_terrain_height(world_position)
-    return rendered_terrain_height < rendered_water_height - SEAMLESS_WATER_PRESENCE_EPSILON
-
-func _update_seamless_water_query_cache(world_position: Vector2) -> void:
-    var water_cell_count: int = TerrainConfiguration.WATER_RESOLUTION - 1
-    var water_cell_size: float = TerrainConfiguration.CHUNK_SIZE / float(water_cell_count)
-    var cell_coordinate: Vector2i = Vector2i(floori(world_position.x / water_cell_size), floori(world_position.y / water_cell_size))
-    if cell_coordinate == _seamless_water_query_cell_coordinate:
-        return
-    _seamless_water_query_cell_coordinate = cell_coordinate
-    var cell_origin_x: float = float(cell_coordinate.x) * water_cell_size
-    var cell_origin_z: float = float(cell_coordinate.y) * water_cell_size
-    var cell_right_x: float = cell_origin_x + water_cell_size
-    var cell_forward_z: float = cell_origin_z + water_cell_size
-    _seamless_water_cell_level = _water_level_sampler.sample_water_level(cell_origin_x + water_cell_size * 0.5, cell_origin_z + water_cell_size * 0.5)
-    _seamless_terrain_top_left_height = get_height_at(Vector2(cell_origin_x, cell_origin_z))
-    _seamless_terrain_top_right_height = get_height_at(Vector2(cell_right_x, cell_origin_z))
-    _seamless_terrain_bottom_left_height = get_height_at(Vector2(cell_origin_x, cell_forward_z))
-    _seamless_terrain_bottom_right_height = get_height_at(Vector2(cell_right_x, cell_forward_z))
-
-func _sample_cached_terrain_height(world_position: Vector2) -> float:
-    return _sample_cached_cell_height(world_position, _seamless_terrain_top_left_height, _seamless_terrain_top_right_height, _seamless_terrain_bottom_left_height, _seamless_terrain_bottom_right_height)
-
-func _sample_cached_cell_height(world_position: Vector2, top_left_height: float, top_right_height: float, bottom_left_height: float, bottom_right_height: float) -> float:
-    var water_cell_count: int = TerrainConfiguration.WATER_RESOLUTION - 1
-    var water_cell_size: float = TerrainConfiguration.CHUNK_SIZE / float(water_cell_count)
-    var cell_origin_x: float = float(_seamless_water_query_cell_coordinate.x) * water_cell_size
-    var cell_origin_z: float = float(_seamless_water_query_cell_coordinate.y) * water_cell_size
-    var local_x: float = clampf((world_position.x - cell_origin_x) / water_cell_size, 0.0, 1.0)
-    var local_z: float = clampf((world_position.y - cell_origin_z) / water_cell_size, 0.0, 1.0)
-    if local_x + local_z <= 1.0:
-        return top_left_height + local_x * (top_right_height - top_left_height) + local_z * (bottom_left_height - top_left_height)
-    return bottom_right_height + (1.0 - local_z) * (top_right_height - bottom_right_height) + (1.0 - local_x) * (bottom_left_height - bottom_right_height)
+func has_water_at(world_position: Vector2) -> bool: # Reports actual clipped water occupancy.
+    if (_water_level_sampler as SeamlessTerrainWaterLevelSampler).boundary_at(world_position) < -WaterBodyPlan.GRID_SPACING * 2.0: # Rejects distant dry points before sampling ground corners.
+        return false # Keeps deep terrain outside explicit bodies dry.
+    return bool(get_water_sample_at(world_position).present) # Delegates occupancy to the authoritative result.

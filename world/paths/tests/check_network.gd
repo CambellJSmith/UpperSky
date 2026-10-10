@@ -35,7 +35,7 @@ func run():
     for p in [chosen.start,chosen.end,Vector2.ZERO,Vector2(-2048,2048),Vector2(2048,2048),Vector2(2048,-2048)]:
         assert(is_equal_approx(isolated.get_height_at(p),terrain.get_height_at(p)))
         assert(isolated.has_water_at(p) == terrain.has_water_at(p))
-        assert(is_equal_approx(isolated.get_water_level_at(p),terrain.get_water_level_at(p)))
+        assert(isolated.get_water_level_at(p) == terrain.get_water_level_at(p)) # Includes identical absent-water sentinels as well as deterministic wet elevations.
     isolated.free()
     var second := WorldPathNetwork.new(terrain)
     second._disk_cache.directory = network._disk_cache.directory

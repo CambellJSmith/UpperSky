@@ -87,6 +87,12 @@ func get_height_at(world_position: Vector2) -> float: # Exposes the authoritativ
     _height_cache[world_position] = height
     return height
 
+func get_water_sample_at(world_position: Vector2) -> Dictionary: # Exposes one water-result interface for production and legacy terrain.
+    var present: bool = has_water_at(world_position) # Respects custom terrain occupancy implementations.
+    var level: float = get_water_level_at(world_position) if present else -INF # Returns an absent surface for dry legacy results.
+    var ground: float = get_height_at(world_position) # Preserves custom terrain height providers in legacy fixtures.
+    return {"present": present, "surface_height": level, "ground_height": ground, "depth": maxf(0.0, level - ground) if present else 0.0, "body_id": "", "downstream_id": "", "flow": Vector2.ZERO} # Leaves body metadata to the production planner override.
+
 func get_water_level_at(world_position: Vector2) -> float: # Exposes the exact flat water-cell level used by rendering and gameplay systems.
     _update_water_query_cache(world_position) # Populates the active rendered-cell data only when the query crosses a cell boundary.
     return _water_query_level # Returns the same deterministic level assigned to the visible water polygon.
@@ -250,6 +256,12 @@ func _build_chunk(chunk_coordinate: Vector2i) -> void:
     RuntimeProfiler.end(_profile_token)
 
 func _profile__build_chunk(chunk_coordinate: Vector2i) -> void: # Generates one terrain chunk with clipped water and installs its streamable runtime node.
+    if _water_mesh_builder is SeamlessTerrainWaterMeshBuilder: # Shares final ground arrays during synchronous production startup.
+        var ground: Array = _mesh_builder.build_chunk_arrays(chunk_coordinate) # Builds the final ground once before water clipping.
+        var ground_mesh: ArrayMesh = _mesh_builder.mesh_from_arrays(ground) # Uploads the authoritative ground buffer.
+        var water_arrays: Array = (_water_mesh_builder as SeamlessTerrainWaterMeshBuilder).build_chunk_arrays(chunk_coordinate, ground) # Clips water against completed ground without repeating terrain sampling.
+        _install_meshes(chunk_coordinate, ground_mesh, _water_mesh_builder.mesh_from_arrays(water_arrays)) # Installs matching synchronous ground and water surfaces.
+        return # Avoids the legacy independent sampling path.
     var terrain_mesh: ArrayMesh = _mesh_builder.build_chunk_mesh(chunk_coordinate) # Generates ground vertices, normals, colours, indices, and material assignment.
     var water_mesh: ArrayMesh = _water_mesh_builder.build_chunk_mesh(chunk_coordinate) # Generates only submerged water polygons and sealed local level transitions.
     _install_meshes(chunk_coordinate,terrain_mesh,water_mesh)
