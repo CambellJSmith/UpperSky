@@ -50,63 +50,68 @@ custom_minimum_size = Vector2(640, 0)
 layout_mode = 2
 theme_override_styles/panel = SubResource("PanelStyle")
 
-[node name="Content" type="VBoxContainer" parent="Shade/Margins/Center/Panel"]
+[node name="Scroll" type="ScrollContainer" parent="Shade/Margins/Center/Panel"]
 layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="Content" type="VBoxContainer" parent="Shade/Margins/Center/Panel/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/separation = 12
 
-[node name="Title" type="Label" parent="Shade/Margins/Center/Panel/Content"]
+[node name="Title" type="Label" parent="Shade/Margins/Center/Panel/Scroll/Content"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 24
 text = "Conversation"
 
-[node name="Separator" type="HSeparator" parent="Shade/Margins/Center/Panel/Content"]
+[node name="Separator" type="HSeparator" parent="Shade/Margins/Center/Panel/Scroll/Content"]
 layout_mode = 2
 
-[node name="Response" type="Label" parent="Shade/Margins/Center/Panel/Content"]
+[node name="Response" type="Label" parent="Shade/Margins/Center/Panel/Scroll/Content"]
 custom_minimum_size = Vector2(0, 92)
 layout_mode = 2
 autowrap_mode = 3
 text = "Good Morning, Traveller."
 
-[node name="Choices Label" type="Label" parent="Shade/Margins/Center/Panel/Content"]
+[node name="Choices Label" type="Label" parent="Shade/Margins/Center/Panel/Scroll/Content"]
 layout_mode = 2
 text = "What Would You Like To Say?"
 
-[node name="Topics" type="VBoxContainer" parent="Shade/Margins/Center/Panel/Content"]
+[node name="Topics" type="VBoxContainer" parent="Shade/Margins/Center/Panel/Scroll/Content"]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="Greeting" type="Button" parent="Shade/Margins/Center/Panel/Content/Topics"]
+[node name="Greeting" type="Button" parent="Shade/Margins/Center/Panel/Scroll/Content/Topics"]
 custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
 text = "Greeting"
 alignment = 0
 
-[node name="City" type="Button" parent="Shade/Margins/Center/Panel/Content/Topics"]
+[node name="City" type="Button" parent="Shade/Margins/Center/Panel/Scroll/Content/Topics"]
 custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
 text = "City"
 alignment = 0
 
-[node name="Work" type="Button" parent="Shade/Margins/Center/Panel/Content/Topics"]
+[node name="Work" type="Button" parent="Shade/Margins/Center/Panel/Scroll/Content/Topics"]
 custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
 text = "Work"
 alignment = 0
 
-[node name="Time" type="Button" parent="Shade/Margins/Center/Panel/Content/Topics"]
+[node name="Time" type="Button" parent="Shade/Margins/Center/Panel/Scroll/Content/Topics"]
 custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
 text = "Time"
 alignment = 0
 
-[node name="Advice" type="Button" parent="Shade/Margins/Center/Panel/Content/Topics"]
+[node name="Advice" type="Button" parent="Shade/Margins/Center/Panel/Scroll/Content/Topics"]
 custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
 text = "Advice"
 alignment = 0
 
-[node name="Goodbye" type="Button" parent="Shade/Margins/Center/Panel/Content"]
+[node name="Goodbye" type="Button" parent="Shade/Margins/Center/Panel/Scroll/Content"]
 custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
 text = "Goodbye"

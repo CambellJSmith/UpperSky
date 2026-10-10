@@ -6,10 +6,10 @@ signal close_requested # Report an explicit goodbye request.
 
 @onready var _shade: Control = $Shade # Own the modal backdrop and conversation panel.
 @onready var _panel: PanelContainer = $Shade/Margins/Center/Panel # Resize the editor-authored panel with the viewport.
-@onready var _title: Label = $Shade/Margins/Center/Panel/Content/Title # Display the speaker's identity.
-@onready var _response: Label = $Shade/Margins/Center/Panel/Content/Response # Display plain text without interpreting world names as markup.
-@onready var _topics: VBoxContainer = $Shade/Margins/Center/Panel/Content/Topics # Retain authored keyboard and controller focus targets.
-@onready var _goodbye: Button = $Shade/Margins/Center/Panel/Content/Goodbye # Provide an explicit conversation exit.
+@onready var _title: Label = $Shade/Margins/Center/Panel/Scroll/Content/Title # Display the speaker's identity.
+@onready var _response: Label = $Shade/Margins/Center/Panel/Scroll/Content/Response # Display plain text without interpreting world names as markup.
+@onready var _topics: VBoxContainer = $Shade/Margins/Center/Panel/Scroll/Content/Topics # Retain authored keyboard and controller focus targets.
+@onready var _goodbye: Button = $Shade/Margins/Center/Panel/Scroll/Content/Goodbye # Provide an explicit conversation exit.
 
 func _ready() -> void: # Connect scene-authored buttons once.
     var index: int = 0 # Map authored buttons to the stable topic order.
@@ -37,3 +37,4 @@ func dismiss() -> void: # Release the visible conversation interface.
 
 func _resize() -> void: # Fit the panel within the current viewport margins.
     _panel.custom_minimum_size.x = minf(640.0, maxf(0.0, get_viewport().get_visible_rect().size.x - 32.0)) # Keep the menu readable on smaller windows.
+    _panel.custom_minimum_size.y = minf(460.0, maxf(0.0, get_viewport().get_visible_rect().size.y - 32.0)) # Allow scrolling instead of overflowing short windows.

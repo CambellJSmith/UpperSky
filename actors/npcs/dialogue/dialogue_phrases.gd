@@ -9,7 +9,7 @@ const TOPICS: Dictionary = { # Define the player-authored conversation choices.
     "advice": "Any Advice For A Traveller?", # Ask for practical world guidance.
 } # Finish the topic catalogue.
 const LINES: Dictionary = { # Store authored phrases with named world-context substitutions.
-    "greeting": ["Good {time_of_day}, traveller.", "A {species} can always spare a moment for conversation.", "Hello there. What brings you this way?", "Well met. It is good to have someone to talk to."], # Vary ordinary greetings.
+    "greeting": ["Good {time_of_day}, traveller.", "This {species} can always spare a moment for conversation.", "Hello there. What brings you this way?", "Well met. It is good to have someone to talk to."], # Vary ordinary greetings.
     "reserved": ["Good {time_of_day}. Keep this brief, please.", "I will hear you out, traveller.", "You may speak, but mind your manners."], # Reflect a poor existing relationship without changing it.
     "friendly": ["Good {time_of_day}! Always a pleasure to see you.", "Come, friend. What is on your mind?", "There you are! I have time for a chat."], # Reflect an established friendly relationship.
     "city": ["{city_name} lies {city_direction}, about {city_distance} from here.", "Looking for a city? Try {city_name}. It is {city_direction}, roughly {city_distance} away.", "I know of {city_name}, {city_distance} to the {city_direction}."], # Reference authoritative generated city coordinates and names.
@@ -28,8 +28,8 @@ const LINES: Dictionary = { # Store authored phrases with named world-context su
 static func response(topic: String, context: Dictionary, variation: int) -> String: # Select a valid context-aware phrase without evaluating arbitrary code.
     var key: String = topic # Begin with the requested topic.
     if topic == "greeting": # Tailor the greeting to existing affection.
-        var affection: float = float(context.get("affection", 50.0)) # Read the speaker's relationship context.
-        key = "reserved" if affection < 30.0 else "friendly" if affection >= 70.0 else "greeting" # Select a relationship-appropriate greeting.
+        var affection: float = float(context.get("affection", AffectionState.NEUTRAL)) # Read the speaker's relationship context.
+        key = "reserved" if affection < AffectionState.NEUTRAL - 40.0 else "friendly" if affection >= AffectionState.NEUTRAL + 40.0 else "greeting" # Select a relationship-appropriate greeting.
     elif topic == "city": # Require real city information before substituting place details.
         key = "current_city" if context.get("in_city", false) else "city" if context.has("city_name") else "unknown_city" # Avoid inventing missing world facts.
     elif topic == "work": # Prefer occupation-specific statements where available.
