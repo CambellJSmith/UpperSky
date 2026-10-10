@@ -9,6 +9,7 @@ const TARGET_INTERVAL: float = 0.12 # Bound prompt raycasts independently of ren
 @onready var _terrain: InfiniteTerrain = $"../World/Terrain" # Resolve the actual procedural geography.
 @onready var _menu: DialogueMenu = $Menu # Resolve the composed menu scene.
 @onready var _prompt: Label = $Prompt # Resolve the authored interaction prompt.
+var _encounter_accepted: bool = false # Preserve a completed friendly exchange until the player dismisses its confirmation.
 var _encounter_definition: Dictionary = {} # Retain the current unsolicited event decision until resolution.
 var _speaker: Villager # Retain the current live conversation target.
 var _target: Villager # Cache the prompt target between bounded raycasts.
@@ -86,6 +87,8 @@ func close_dialogue() -> void: # Restore gameplay after every conversation exit 
         return # Preserve another interface's ownership.
     var event_speaker: Villager = _speaker if is_instance_valid(_speaker) else null # Preserve a valid actor for the event completion signal.
     var was_encounter: bool = not _encounter_definition.is_empty() # Treat every ordinary close as peaceful refusal.
+    var event_accepted: bool = _encounter_accepted # Preserve completed friendly consent when its confirmation closes.
+    _encounter_accepted = false # Reset completion state before callbacks can open another conversation.
     _encounter_definition.clear() # Prevent duplicate consent resolution or reentrant callbacks.
     if is_instance_valid(_speaker): # Release a surviving actor's conversation reservation.
         _speaker.end_dialogue(self) # Resume ordinary wandering without resetting its route.
@@ -95,7 +98,7 @@ func close_dialogue() -> void: # Restore gameplay after every conversation exit 
     if is_instance_valid(_player): # Restore controls only while the player still exists.
         _player.set_gameplay_input_enabled(true) # Return mouse capture and gameplay input.
     if was_encounter: # Notify event ownership after ordinary conversation cleanup completes.
-        encounter_resolved.emit(event_speaker, false) # Closing without explicit agreement never changes affection.
+        encounter_resolved.emit(event_speaker, event_accepted) # Distinguish a pending refusal from an already completed friendly exchange.
 
 func _speak(topic: String) -> void: # Respond to a selected authored player phrase.
     if not _speaker_valid(): # Revalidate after an actor dies or unloads between frames.
@@ -142,23 +145,35 @@ func can_start_encounter() -> bool: # Expose modal readiness without revealing c
     return _context.is_empty() and _gameplay_active() # Wait for live gameplay and exclusive conversation availability.
 
 func open_encounter(npc: Villager, kind: String) -> bool: # Start an unsolicited conversation only after the actor arrives.
-    var definition: Dictionary = RadiantEventPhrases.definition(kind, hash(str(npc.get_social_record().get("npc_id", npc.name))) if is_instance_valid(npc) else 0) # Resolve supported authored content before taking input.
-    if definition.is_empty() or not open_dialogue(npc): # Reuse ordinary reach, health, species and input ownership checks.
+    if not is_instance_valid(npc) or not can_start_encounter(): # Respect actor lifetime and current input ownership before preparing goods.
+        return false # Avoid changing stock while another menu owns gameplay.
+    var quote: Dictionary = RadiantOfferService.prepare(npc, kind) # Retain one stock-backed quote for the actor's lifetime.
+    if quote.is_empty() or not open_dialogue(npc): # Reuse ordinary reach, health, species and input ownership checks.
         return false # Leave the current gameplay or menu undisturbed.
-    definition["opening"] = str(definition.opening).format(_context) # Reuse ordinary dynamic world terms in radiant invitation phrases.
-    _encounter_definition = definition # Retain the pending consent effect.
-    _menu.present_encounter(definition) # Offer event-specific acceptance and refusal controls.
+    _encounter_definition = RadiantOfferService.render(quote, _context) # Expand exact item terms and real world facts once per conversation.
+    _encounter_accepted = false # Start with an explicitly pending player decision.
+    _menu.present_encounter(_encounter_definition) # Offer authored event-specific acceptance and refusal controls.
     return true # Confirm that the actor has started its radiant conversation.
 
 func _resolve_encounter(accepted: bool) -> void: # Apply consent exactly once before releasing the conversation.
-    if _encounter_definition.is_empty(): # Reject stale button signals after an event has ended.
-        return # Avoid changing affection from an ordinary conversation.
+    if _encounter_definition.is_empty() or _encounter_accepted: # Reject stale buttons after a friendly exchange has completed.
+        return # Avoid duplicate gifts, purchases, payments or hostility.
     if not _speaker_valid(): # Revalidate combat, death, range and streaming at the moment of selection.
-        close_dialogue() # Treat an invalid conversation as cancellation.
-        return # Do not create hostility after the actor becomes unavailable.
+        close_dialogue() # Treat an invalid pending conversation as cancellation.
+        return # Do not mutate unavailable actors or player inventory.
+    if not accepted: # Preserve all goods and affection when the player refuses.
+        close_dialogue() # Route refusal through ordinary conversation cleanup and event scheduling.
+        return # Leave the stored quote unused while the actor departs.
     var npc: Villager = _speaker # Preserve the accepted actor across menu cleanup.
-    if accepted and _encounter_definition.get("hostile_on_accept", false): # Require explicit consent before initiating the declared battle.
-        npc.set_affection(AffectionState.HATE) # Immediately trigger the existing hostility perception policy.
-    _encounter_definition.clear() # Suppress the ordinary-close refusal callback during explicit resolution.
-    close_dialogue() # Restore gameplay and resume actor simulation before event scheduling continues.
-    encounter_resolved.emit(npc, accepted) # Report the player's explicit event decision once.
+    var inventory: PlayerInventory = _player.get_node("PlayerInventory") as PlayerInventory # Resolve the authoritative player-owned inventory.
+    var outcome: Dictionary = RadiantOfferService.accept(npc, inventory) # Settle the stored quote with full stock, payment and weight validation.
+    if not outcome.success: # Keep a failed exchange pending without charging or granting anything.
+        _menu.show_response(outcome.message) # Explain missing payment, stock or carrying capacity in the actual menu.
+        return # Allow a peaceful refusal or a later valid retry.
+    if outcome.get("hostile", false): # Resume accepted battle challenges immediately.
+        _encounter_definition.clear() # Suppress the ordinary-close refusal callback during explicit battle resolution.
+        close_dialogue() # Restore gameplay before the hostile actor's next combat update.
+        encounter_resolved.emit(npc, true) # Report the accepted battle once to the director.
+        return # Avoid holding an already hostile actor behind a confirmation screen.
+    _encounter_accepted = true # Keep a successful friendly transaction immune to repeated button presses.
+    _menu.present_encounter_result(str(_encounter_definition.get("success", outcome.message))) # Show the authored result or factual local information before goodbye.
