@@ -32,6 +32,7 @@ func _ready() -> void: # Connect scene-authored buttons once.
 func present(title: String, response: String) -> void: # Open the menu with the resolved speaker and initial line.
     _topics.show() # Restore ordinary conversation topics after a radiant event.
     _encounter.hide() # Hide event-only consent choices for normal conversations.
+    _goodbye.text = "Goodbye" # Restore the ordinary exit label after event confirmation.
     _goodbye.show() # Restore the ordinary conversation exit.
     _title.text = title # Show the actual species and occupation.
     _response.text = response # Present the first authored NPC response.
@@ -49,6 +50,8 @@ func _resize() -> void: # Fit the panel within the current viewport margins.
     _panel.custom_minimum_size.y = minf(460.0, maxf(0.0, get_viewport().get_visible_rect().size.y - 32.0)) # Allow scrolling instead of overflowing short windows.
 
 func present_encounter(definition: Dictionary) -> void: # Replace ordinary topics with the event's explicit decision.
+    if definition.has("title"): # Use the event speaker's natural role when supplied.
+        _title.text = definition.title # Display an authored trader or traveller identity.
     _response.text = definition.opening # Show the authored unsolicited invitation.
     _accept.text = definition.accept # Explain the effect the player is agreeing to.
     _decline.text = definition.decline # Keep a peaceful refusal clearly available.
@@ -56,3 +59,10 @@ func present_encounter(definition: Dictionary) -> void: # Replace ordinary topic
     _goodbye.hide() # Use the explicit refusal button for event exits.
     _encounter.show() # Reveal the editor-authored consent controls.
     _decline.grab_focus() # Require a deliberate selection before agreeing to battle.
+
+func present_encounter_result(message: String) -> void: # Confirm a completed friendly exchange before releasing the speaker.
+    _response.text = message # Display thanks or factual local information from the successful event.
+    _encounter.hide() # Remove acceptance controls once goods have already changed hands.
+    _goodbye.text = "Thank You. Goodbye" # Give the player a clear acknowledgement and exit.
+    _goodbye.show() # Reveal the authored exit button for completion.
+    _goodbye.grab_focus() # Support immediate keyboard and controller acknowledgement.

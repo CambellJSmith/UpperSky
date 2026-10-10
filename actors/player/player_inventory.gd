@@ -118,3 +118,28 @@ func restore_stacks(stacks: Array) -> void:
     _stacks.clear()
     for stack in stacks: _stacks.append(stack)
     _revision += 1
+
+func try_exchange_items(payment_id: StringName, payment_quantity: int, reward: InventoryStack, reward_quantity: int) -> bool: # Apply an exchange atomically after validating final weight and compatible stack metadata.
+    if payment_quantity < 0 or reward_quantity < 0 or (reward_quantity > 0 and reward == null): # Reject malformed transaction quantities and missing rewards.
+        return false # Leave all existing player stacks untouched.
+    var payment: InventoryStack = _find_stack(payment_id) if payment_quantity > 0 else null # Resolve only an actual required payment.
+    if payment_quantity > 0 and (payment == null or payment.get_quantity() < payment_quantity): # Require the complete quoted payment before any mutation.
+        return false # Avoid partial payments and duplicated receipts.
+    var final_weight: float = get_total_weight() - (payment.get_unit_weight() * payment_quantity if payment != null else 0.0) # Account for space freed by the quoted outgoing goods.
+    if reward_quantity > 0: # Validate an actual incoming stack before charging the player.
+        var weight: float = reward.get_unit_weight() # Read immutable metadata from the source's stock.
+        if reward.get_item_id() == &"" or not is_finite(weight) or weight < 0.0 or not InventoryCategory.is_valid(reward.get_category()): # Reject unusable or conflicting receipt metadata.
+            return false # Preserve all payment goods when receipt validation fails.
+        if payment_quantity > 0 and payment_id == reward.get_item_id(): # Require meaningful exchanges between distinct item types.
+            return false # Avoid ambiguous same-stack transactions.
+        var existing: InventoryStack = _find_stack(reward.get_item_id()) # Inspect the prospective destination stack without adding it.
+        if existing != null and (not is_equal_approx(existing.get_unit_weight(), weight) or existing.get_category() != reward.get_category()): # Match ordinary inventory stack consistency rules.
+            return false # Reject metadata conflicts before any payment is removed.
+        final_weight += weight * reward_quantity # Check the complete final carried load rather than the pre-exchange load.
+        if final_weight > get_maximum_weight() + WEIGHT_EPSILON: # Respect the live carrying capacity after outgoing goods leave.
+            return false # Keep payments intact when the received goods cannot fit.
+    if payment_quantity > 0: # Commit only after every receipt and payment check has passed.
+        remove_item(payment_id, payment_quantity) # Remove the complete prevalidated outgoing quantity.
+    if reward_quantity > 0: # Commit the prevalidated incoming quantity synchronously.
+        try_add_item(reward.get_item_id(), reward.get_display_name(), reward.get_unit_weight(), reward_quantity, reward.get_category()) # Add compatible goods within the already validated final capacity.
+    return true # Report a complete exchange with no awaited or partially validated mutation.

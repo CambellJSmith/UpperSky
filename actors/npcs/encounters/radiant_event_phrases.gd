@@ -11,5 +11,10 @@ const CHALLENGES: Array[String] = [ # Supply varied prewritten invitations witho
 
 static func definition(kind: String, variation: int) -> Dictionary: # Resolve supported event content before reserving an NPC.
     if kind != BATTLE_CHALLENGE: # Reject unknown event identifiers without opening incomplete menus.
-        return {} # Leave gameplay ownership unchanged.
-    return {"opening": CHALLENGES[posmod(variation, CHALLENGES.size())], "accept": "I Accept Your Challenge", "decline": "No, Thank You", "hostile_on_accept": true} # Declare authored responses and the accepted event effect.
+        return RadiantOfferCatalogue.definition(kind) # Resolve authored noncombat exchanges through their separate catalogue.
+    return {"kind": kind, "opening": CHALLENGES[posmod(variation, CHALLENGES.size())], "accept": "I Accept Your Challenge", "decline": "No, Thank You", "hostile_on_accept": true} # Declare authored responses and the accepted event effect.
+
+static func kinds() -> Array[String]: # Expose a finite mixed encounter pool to the scheduler.
+    var result: Array[String] = RadiantOfferCatalogue.kinds() # Start with authored merchants, gifts and traveller needs.
+    result.append(BATTLE_CHALLENGE) # Preserve the existing consent-based battle invitation.
+    return result # Let encounter selection avoid immediate repetition across all supported types.
